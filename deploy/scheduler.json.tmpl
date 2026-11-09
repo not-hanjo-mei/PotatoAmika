@@ -1,0 +1,19 @@
+{
+ "brain_model": "@ROOT@/models/Minico-M1-1105-Q4_K_M.gguf",
+ "brain_threads": 2,
+ "embed_model": "@ROOT@/models/v5-nano-retrieval-Q4_K_M.gguf",
+ "embed_threads": 2,
+ "listen": "127.0.0.1:18100",
+ "llama_server_bin": "/usr/bin/llama-server",
+ "memory_dir": "@ROOT@/data/memory",
+ "memory_language": "en",
+ "persona_file": "@ROOT@/persona/表层.txt",
+ "scenes_file": "@ROOT@/persona/scenes_en.json",
+ "tts_bin": "@ROOT@/bin/tts_host",
+ "tts_engine": "free",
+ "tts_outdir": "@ROOT@/out/tts",
+ "tts_root": "@ROOT@/tts",
+ "tts_threads": 2,
+ "vision_mmproj": "@ROOT@/models-vision/mmproj-LFM2.5-VL-450m-F16.gguf",
+ "vision_model": "@ROOT@/models-vision/LFM2.5-VL-450M-Q4_K_M.gguf"
+}
