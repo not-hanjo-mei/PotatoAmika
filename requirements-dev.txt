@@ -1,7 +1,0 @@
-# Running the offline test suite in the brain environment (some tests import speech-side modules):
-#   envs\brain\Scripts\python.exe -m pip install -r requirements-dev.txt
-#   envs\brain\Scripts\python.exe -m pytest tests -k "not live"
-pytest>=8
-numpy
-aiohttp>=3.9
-soundfile

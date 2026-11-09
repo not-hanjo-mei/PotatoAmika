@@ -1,4 +1,0 @@
-# Optional: Discord support for "Text her" (messengers/service.py runs in the speech environment).
-# Telegram needs nothing extra (aiohttp comes with speech/requirements.txt).
-#   envs\speech\Scripts\python.exe -m pip install -r messengers\requirements.txt
-discord.py>=2.3,<3

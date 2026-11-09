@@ -1,6 +1,0 @@
-{
-  "_readme": "Copy to config/messengers.json (git-ignored) or fill it in on the Setup page → Text her. A bot answers only the user ids listed under allowed_users; everyone else is told their id so you can add it. Discord: Developer Portal → New Application → Bot → Reset Token; invite it with the `bot` scope (no permissions are needed for DMs; add Send Messages to use it in a server, where it answers when @mentioned). Telegram: @BotFather → /newbot → the token; send the bot /id to learn your id.",
-  "discord": { "enabled": false, "token": "", "allowed_users": [] },
-  "telegram": { "enabled": false, "token": "", "allowed_users": [] },
-  "state": { "last_chat": null }
-}

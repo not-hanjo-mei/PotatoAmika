@@ -1,5 +1,0 @@
-{
-  "cozy": { "Desk Lamp": "on", "Ceiling Light": "off" },
-  "goodnight": { "Desk Lamp": "off", "Ceiling Light": "off", "Heater": "off" },
-  "wake up": { "Desk Lamp": "on", "Heater": "on" }
-}
