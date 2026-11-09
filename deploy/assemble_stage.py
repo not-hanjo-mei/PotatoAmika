@@ -41,6 +41,10 @@ cp(f"{ROOT}/scheduler/models/v5-nano-retrieval-Q4_K_M.gguf", "models/v5-nano-ret
 # tts tree from phone-calib-all layout
 cal = f"{ROOT}/tts-engine/phone-calib-all"
 cp_tree(f"{cal}/wo-packs", "tts/wo-packs")
+# free engine compiles the GPT encoder plan from work/wo_graphs/w4 at startup
+# (tts-engine/host/src/main.cpp); the previous package missed this file and
+# dry-run could not catch it (the phone install needed a hand-carried copy).
+cp(f"{ROOT}/tts-engine/work/wo_graphs/w4/t2s_encoder_fp32.onnx", "tts/work/wo_graphs/w4/t2s_encoder_fp32.onnx")
 cp_tree(f"{cal}/host/packed_graphs", "tts/host/packed_graphs")
 cp_tree(f"{cal}/host/data", "tts/host/data")
 cp_tree(f"{cal}/host/refpacks", "tts/host/refpacks")
@@ -48,7 +52,11 @@ cp_tree(f"{cal}/host/refpacks", "tts/host/refpacks")
 for f in ["onnx_decoder_model_merged_quantized.onnx", "onnx_encoder_model_quantized.onnx", "silero_vad.onnx", "vocab.tsv"]:
     cp(f"{ROOT}/asr/models/{f}", f"asr-models/{f}")
 # orig-ui: adapter + patched + pristine subset (mirrors the preview machine) + static + docs
-cp(f"{ROOT}/orig-ui/adapter.js", "orig-ui/adapter.js")
+# The adapter is the pure-Go static binary since the 2026-11-10 package
+# generation (source: orig-ui/go/, zero dependencies, CGO off, behaviour
+# verified 1:1 against the JS adapter it replaces). Node is gone from the
+# install entirely; orig-ui/adapter.js is no longer staged.
+cp(f"{ROOT}/orig-ui/go/adapter-aarch64", "bin/adapter")
 cp(f"{ROOT}/orig-ui/REMOVALS.md", "orig-ui/REMOVALS.md")
 cp(f"{ROOT}/orig-ui/live2d-files.txt", "orig-ui/live2d-files.txt")
 for f in ["use.html", "use.js", "common.js"]:
