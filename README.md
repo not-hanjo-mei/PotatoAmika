@@ -1,9 +1,13 @@
 # PotatoAmika
 
-**Status: very early exploration.** PotatoAmika is an experiment in
-progress, not finished software — it has only ever run on one phone and
-one preview machine, so expect rough edges, missing pieces and no
-support. Please don't judge it by the standards of a usable release.
+**Status: very early exploration — now running on the phone.**
+PotatoAmika is an experiment in progress, not finished software, so
+expect rough edges, missing pieces and no support. It was installed
+on its target handset (the Mi 4c below) on 2026-11-10 and passed the
+installer's full self-test there — conversation round trip, speech
+recognition, standalone synthesis and model listing all green — with
+the brain running at four threads. Please don't judge it by the
+standards of a usable release.
 
 **PotatoAmika** is a ground-up, fully local reimplementation of
 [OpenAmika](https://github.com/zeekk0/OpenAmika)'s runtime. The original
@@ -11,7 +15,8 @@ targets Windows, an NVIDIA GPU and a Python stack of separate services.
 This one targets a 2015 Xiaomi Mi 4c (Snapdragon 808, ~1.3 GiB of usable
 RAM, Alpine Linux in a container): a 350M-parameter brain, a hand-written
 C++ TTS engine with 4-bit weights, small local ears, and the original
-Live2D page as the face. At runtime there is no Python and no cloud call.
+Live2D page as the face. At runtime there is no Python, no Node and no
+cloud call.
 
 This repository is a fork of zeekk0/OpenAmika. Everything we built is at
 the repository root, in the directories listed below. The original
@@ -28,8 +33,8 @@ documents, which our documents now sit alongside in `docs/`.
 | `quantize/` | The conversion method: how the shipping weight packs are made from stock GPT-SoVITS fine-tune weights, locally. Start at `quantize/README.md`. |
 | `scheduler/` | The orchestrator (Go, standard library only): owns the brain/embeddings llama.cpp servers and the TTS host; conversation turns, memory extraction and recall, tone classification, vision unload/reload for photo questions, and a standalone `POST /v1/say` synthesis endpoint. Contract: `docs/API.md`. |
 | `asr/` | The ears: Moonshine Tiny (quantized) + Silero VAD in one C++ ONNX Runtime host with a streaming mode, plus a small Go WebSocket gateway. Record: `docs/ASR.md`. |
-| `ui-adapter/` | Serves upstream's original Use page (`ui/` in this repo) against the scheduler. `patch.py` regenerates the three patched page files from the pristine `ui/` sources; what was removed from the page, and why, is listed in `REMOVALS.md`. Features this runtime definitively does not have are removed from the page, never faked. |
-| `deploy/` | One-command install into the phone's container (`deploy.sh`), the scheduler config template, and the hash-pinned Live2D file list the installer fetches models with. |
+| `ui-adapter/` | Serves upstream's original Use page (`ui/` in this repo) against the scheduler. The adapter is a single static Go binary (`ui-adapter/go/`, standard library only; ~9 MB, steady RSS ~13 MB — the Node build it replaced used ~65 MB), so no JavaScript runtime exists anywhere in the stack. `patch.py` regenerates the three patched page files from the pristine `ui/` sources; what was removed from the page, and why, is listed in `REMOVALS.md`. Features this runtime definitively does not have are removed from the page, never faked. |
+| `deploy/` | One-command install into the phone's container (`deploy.sh`). The package is slim: the public GGUF and ASR models are not in the tarball — `deploy.sh` downloads them at install time from hash-pinned revisions (the Minico brain GGUF is pinned to revision `eee16357`; upstream's `main` has since diverged), reuses a hash-matching brain GGUF already in the home directory when one is there, and fetches the Live2D models the same way (`live2d-files.txt`). Package assembly: `assemble_stage.py` + `build_slim.sh`. |
 | `docs/` | PotatoAmika's engineering record: STAGE1–3 (TTS bring-up), ORT-FREE (dropping ONNX Runtime), VITS-W4 and DEESS (the voice output chain), SCHEDULER + API, ASR + FREE-CENSUS (why ASR stayed on ORT), BUDGET (the 1.3 GiB memory ledger), CONVO-TEST/2 (live conversation tests). These files sit alongside upstream's own documents in the same folder; upstream's files are unchanged. |
 
 ## What is NOT here — bring your own
@@ -51,9 +56,11 @@ No weights, models or persona files are in this repository, in any form:
   config; what you put there is yours.
 - **GGUF models.** Brain (Minico-M1-1105), embeddings (Jina embeddings
   v5 text nano) and vision (LFM2.5-VL-450M) — exact files and sizes in
-  `docs/BUDGET.md`.
+  `docs/BUDGET.md`. The installer downloads all three at install time
+  from the pinned revisions in `deploy/deploy.sh`, or supply your own.
 - **ASR models.** Moonshine Tiny + Silero VAD (both MIT) — see
-  `docs/ASR.md`.
+  `docs/ASR.md`. The installer downloads them at install time from the
+  pinned revisions in `deploy/deploy.sh`.
 
 ## TTS release scope: English
 

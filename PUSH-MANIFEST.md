@@ -257,3 +257,120 @@ script), the non-Python files under `IoT/` (driver installers and
 and `README_IF_YOU_ARE_AI_AGENT.md` (upstream documents left
 untouched — candidates for a later owner decision, like the
 non-license docs).
+
+---
+
+# Round 2 — 2026-11-10: Go adapter, slim deploy, on-device status
+
+Second sync of PotatoAmika's own work, following the first push
+above (base head before this round: `cf62682`, the round-1 deletion
+commit). Same method: direct git push over SSH from the maintainer
+machine, logical commits, author `not-hanjo-mei`.
+
+## Commits
+
+1. `1645abfbb3354959b0adf714447646a670626418` — "rewrite the Use
+   page adapter in Go as a single static binary; drop the Node
+   build". `ui-adapter/go/**` added (8 files), `ui-adapter/README.md`
+   rewritten for the Go build, `ui-adapter/adapter.js` removed (the
+   Node implementation remains in git history at `cf62682`).
+2. `13e2e4266c039b3a0344510d9a74041069752064` — "slim the deploy
+   package: public models pulled at install time, Go adapter, four
+   install fixes". `deploy/deploy.sh` replaced by the current slim
+   version, `deploy/assemble_stage.py` updated, `deploy/build_slim.sh`
+   added. `deploy/live2d-files.txt` and `deploy/scheduler.json.tmpl`
+   are unchanged (verified identical to the current package's).
+3. This commit — root `README.md` status update (our section only;
+   the upstream text below the marker line is byte-identical to
+   round 1, verified by hash before and after) and this manifest
+   section.
+
+## What changed and why
+
+- **Adapter, Node → Go.** The Use page adapter was rewritten in Go
+  (standard library only, CGO off, self-contained WebSocket) as a
+  single static binary — aarch64 8,812,626 B, x86_64 9,128,191 B.
+  Steady-state RSS ≈ 13 MB on the preview machine vs ≈ 65 MB for
+  the Node build (dev machine 8.4 MB vs 42.5 MB). Behaviour is
+  unchanged: same endpoints and environment knobs, HTTP acceptance
+  suite 39/39 on both implementations, one conversation round
+  compared event-for-event, and the `/api/tts_say` streaming
+  keepalive + result-cache semantics (built for proxies that kill
+  idle responses) preserved. Only the compiled binaries are
+  deployed; this repository carries the source, never the binaries.
+  The phone still runs the Node build installed earlier; swapping
+  it on-device awaits the owner's nod.
+- **Deploy package, slim generation.** The current package is
+  `potatoamika-slim.tar` — 249,712,640 B, sha256
+  `10e1d2790ff65685e3f7a00fbdf6988627d7fff145270f833278b0d4fb5198cd`,
+  112 files (the tarball itself does not enter this repository, as
+  before). The public models are no longer in the tar: brain and
+  embeddings GGUFs and the three ASR models are downloaded by
+  `deploy.sh` at install time from hash-pinned revisions (Minico
+  pinned to `eee16357` — upstream `main` has since changed the
+  file; a hash-matching brain GGUF already in the home directory is
+  reused instead of downloaded), alongside the vision GGUFs and the
+  Live2D models the installer already fetched. Four defects found
+  during the first on-device install are fixed in the assembly
+  sources (a missing TTS encoder graph in the file list, the vision
+  step's missing directory, two pid-file writes, and the brain-GGUF
+  reuse path now also checking `~/models/`). The adapter step now
+  starts the Go binary, and the installer's nodejs step is gone —
+  no JavaScript runtime is installed; onnxruntime remains (the ASR
+  host and the ORT TTS fallback use it).
+- **Status.** PotatoAmika was installed on the target Xiaomi Mi 4c
+  on 2026-11-10 and passed the installer's full self-test there
+  (conversation round trip, speech recognition, standalone
+  synthesis, model listing); the brain runs at four threads. The
+  root README's PotatoAmika section now says so.
+
+## Round-2 delta inventory
+
+| Path | Bytes | Change |
+|---|---|---|
+| `ui-adapter/go/avatar.go` | 9112 | added |
+| `ui-adapter/go/dialog.go` | 13041 | added |
+| `ui-adapter/go/go.mod` | 36 | added |
+| `ui-adapter/go/main.go` | 14068 | added |
+| `ui-adapter/go/say.go` | 4322 | added |
+| `ui-adapter/go/server.go` | 21775 | added |
+| `ui-adapter/go/tz.go` | 8688 | added |
+| `ui-adapter/go/ws.go` | 5745 | added |
+| `ui-adapter/README.md` | 2812 | rewritten |
+| `ui-adapter/adapter.js` | 42678 | removed |
+| `deploy/assemble_stage.py` | 5659 | updated |
+| `deploy/build_slim.sh` | 2251 | added |
+| `deploy/deploy.sh` | 24281 | replaced (slim version) |
+| `README.md` | — | our section only (see above) |
+
+## Publication edits (round 2, staged copies only; originals untouched)
+
+- `ui-adapter/go/main.go` — the preview-machine default directories
+  replaced by paths relative to the adapter binary (`pristine/`,
+  `patched/`, `models-live2d/`, `static/`, `data/`), mirroring the
+  Node build's staged defaults from round 1; `deploy.sh` sets all
+  five environment variables explicitly, so installed behaviour is
+  unchanged. This is the only deviation from the build-verified
+  source: the maintainer machine has no Go toolchain (the binaries
+  are cross-built on the build host), so the staged copy is shipped
+  with the edit confined to that one default-path block.
+- `deploy/assemble_stage.py` — source/stage roots made
+  environment-overridable (`POTATO_SRC`, `POTATO_STAGE`) with
+  neutral defaults, as in round 1 (the development copy had
+  regressed to literal paths during the slim work).
+- `deploy/build_slim.sh` — stage root made overridable via
+  `POTATO_STAGE` with a `$HOME`-relative default.
+
+## Red-line scan record (round 2)
+
+Same criteria and methods as round 1, run over the round-2 delta
+before the push and re-run over the remote tree after it:
+
+| Check | Result |
+|---|---|
+| Weight/model formats (extension blacklist) | 0 hits |
+| Binaries (`file` magic scan for ELF/Mach-O/PE over added files — the compiled adapter binaries in the development tree were not copied, source only) | 0 hits |
+| Secrets (round-1 regex sweep) | 0 matches |
+| Machine paths in code (`/home/hatch`, `/data/home`, preview/trial hostnames in `*.go *.py *.sh *.tmpl *.mod`) | 0 after the publication edits above |
+| Persona filenames, `namedict.tsv`, `memory.json`, Live2D model files | 0 — none in the delta |
+| Symlinks / UTF-8 | 0 / all pass |
