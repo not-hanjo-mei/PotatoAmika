@@ -1,3 +1,90 @@
+# PotatoAmika
+
+**Status: very early exploration.** PotatoAmika is an experiment in
+progress, not finished software — it has only ever run on one phone and
+one preview machine, so expect rough edges, missing pieces and no
+support. Please don't judge it by the standards of a usable release.
+
+**PotatoAmika** is a ground-up, fully local reimplementation of
+[OpenAmika](https://github.com/zeekk0/OpenAmika)'s runtime. The original
+targets Windows, an NVIDIA GPU and a Python stack of separate services.
+This one targets a 2015 Xiaomi Mi 4c (Snapdragon 808, ~1.3 GiB of usable
+RAM, Alpine Linux in a container): a 350M-parameter brain, a hand-written
+C++ TTS engine with 4-bit weights, small local ears, and the original
+Live2D page as the face. At runtime there is no Python and no cloud call.
+
+This repository is a fork of zeekk0/OpenAmika. Everything we built is at
+the repository root, in the directories listed below. The original
+Python implementation has been removed from this fork; what remains of
+upstream is the Use page sources (`ui/`), the JS vendor libraries, the
+license texts (`LICENSE`, `THIRD_PARTY_NOTICES.md`) and upstream's own
+documents, which our documents now sit alongside in `docs/`.
+
+## Layout
+
+| Directory | What it is |
+|---|---|
+| `engine/` | Self-built TTS inference engine (C++17, no ONNX Runtime): static load-time execution plans for the five GPT-SoVITS graphs, a W4 weight-only packed format with fused dequantization, CPU-dispatched kernels (ARMv8.0 NEON baseline, x86-64 AVX2). GPT decode ~45 ms/step class on a Cortex-A57, ~270–320 MB resident. Design record: `docs/ORT-FREE.md`, `docs/STAGE*.md`. |
+| `quantize/` | The conversion method: how the shipping weight packs are made from stock GPT-SoVITS fine-tune weights, locally. Start at `quantize/README.md`. |
+| `scheduler/` | The orchestrator (Go, standard library only): owns the brain/embeddings llama.cpp servers and the TTS host; conversation turns, memory extraction and recall, tone classification, vision unload/reload for photo questions, and a standalone `POST /v1/say` synthesis endpoint. Contract: `docs/API.md`. |
+| `asr/` | The ears: Moonshine Tiny (quantized) + Silero VAD in one C++ ONNX Runtime host with a streaming mode, plus a small Go WebSocket gateway. Record: `docs/ASR.md`. |
+| `ui-adapter/` | Serves upstream's original Use page (`ui/` in this repo) against the scheduler. `patch.py` regenerates the three patched page files from the pristine `ui/` sources; what was removed from the page, and why, is listed in `REMOVALS.md`. Features this runtime definitively does not have are removed from the page, never faked. |
+| `deploy/` | One-command install into the phone's container (`deploy.sh`), the scheduler config template, and the hash-pinned Live2D file list the installer fetches models with. |
+| `docs/` | PotatoAmika's engineering record: STAGE1–3 (TTS bring-up), ORT-FREE (dropping ONNX Runtime), VITS-W4 and DEESS (the voice output chain), SCHEDULER + API, ASR + FREE-CENSUS (why ASR stayed on ORT), BUDGET (the 1.3 GiB memory ledger), CONVO-TEST/2 (live conversation tests). These files sit alongside upstream's own documents in the same folder; upstream's files are unchanged. |
+
+## What is NOT here — bring your own
+
+No weights, models or persona files are in this repository, in any form:
+
+- **Voice weights.** A GPT-SoVITS fine-tune (for Amika, MekaHime's
+  `MekaHime_Amika` on Hugging Face) is the input to `quantize/`. The
+  quantized packs that pipeline produces are derivatives of those
+  weights and are likewise not distributed here — make your own from
+  weights you have the right to use. MekaHime's weights and Live2D
+  models are under MekaHime's personal-use license; use them only as
+  that license allows.
+- **Live2D models.** Also MekaHime's, same license. `deploy.sh` fetches
+  them at install time using `deploy/live2d-files.txt` (per-file hash
+  verification), or supply your own.
+- **Persona files.** The character's persona texts are not included, in
+  any language. The scheduler loads persona files from paths in its
+  config; what you put there is yours.
+- **GGUF models.** Brain (Minico-M1-1105), embeddings (Jina embeddings
+  v5 text nano) and vision (LFM2.5-VL-450M) — exact files and sizes in
+  `docs/BUDGET.md`.
+- **ASR models.** Moonshine Tiny + Silero VAD (both MIT) — see
+  `docs/ASR.md`.
+
+## TTS release scope: English
+
+The engine source keeps its full G2P code, but this release ships data
+for the **English** text path only:
+
+- `engine/data/cmudict.tsv` — from the CMU Pronouncing Dictionary
+  (freely redistributable; credit CMU).
+- `engine/data/symbols.txt` — the phoneme symbol table, following the
+  GPT-SoVITS v2 symbol set (GPT-SoVITS is MIT).
+
+Chinese G2P dictionary data is **not** included, so out of the box the
+engine speaks English text — which is also all PotatoAmika itself ever
+speaks at runtime. One supplemental name dictionary used during
+development (`namedict.tsv`) is withheld: its provenance could not be
+verified to the standard this release requires. It is named in
+`PUSH-MANIFEST.md`.
+
+## License
+
+The code added by PotatoAmika (`engine/`, `scheduler/`, `asr/`,
+`quantize/`, `ui-adapter/`, `deploy/` and our documents in `docs/`) is
+our own work in this fork of OpenAmika (MIT — see `LICENSE` and
+`THIRD_PARTY_NOTICES.md` at the repository root, which remain in
+force). Nothing here grants any rights to MekaHime's character, voice
+weights, Live2D models or persona materials.
+
+The original upstream README follows below, unchanged, for reference.
+
+---
+
 <div align="center">
 
 <img src="docs/images/amika-avatar.png" alt="Amika" width="180">
