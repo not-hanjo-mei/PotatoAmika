@@ -45,6 +45,14 @@ target_link_libraries(vits_check PRIVATE onnxruntime)
 add_executable(kbench src/kbench.cpp)
 target_link_libraries(kbench PRIVATE onnxruntime pthread)
 
+# GEMV tier micro-bench (packed_core.h only, no ORT): builds for the
+# NDK target too, unlike kbench whose ORT import is x86-only.
+add_executable(gemv_bench src/gemv_bench.cpp)
+if(NOT ANDROID)
+  target_link_libraries(gemv_bench PRIVATE pthread)
+endif()
+target_include_directories(gemv_bench PRIVATE src)
+
 # ORT-free engine (ORT-FREE.md): GPT-side replacement, phase 1.
 # Deliberately NOT linked against onnxruntime -- the point of the
 # exercise. Parallel existence only; shipping defaults unchanged.
