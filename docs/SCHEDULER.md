@@ -380,3 +380,18 @@ say 宿主峰值 HWM 曾达 641 MB 的瞬时值，外加驻留账写成之后新
   退役出包；Live2D 模型不进 tar，装机时按 orig-ui/live2d-files.txt 从
   hf-mirror 逐件拉并验哈希，自检含 /v1/say 与模型发现两条。手机常驻账
   更新为约 1,019 至 1,075 MB、余 236 至 292 MB（BUDGET.md）。
+
+## 大脑换 Omni 与三合一（2026-11-11，详见 OMNI-INTEGRATION.md）
+
+LFM3VL 三门全过后按既定口径集成：`config.dev.json` 现为 Omni 配置
+（大脑 LFM3-Omni-2B Q4_0 + F16 mmproj 常驻、spike 的 llama.cpp 构建、
+思考键 `brain_thinking: "lfm3"` 即 enable_thinking=false），原 Minico
+配置整份保为 `config.minico.json` 回退。新增代码点：chat 请求加
+`cache_prompt: true`（第二轮起系统前缀整段复用，实测第二轮只算
+601 个新 token）；Omni 会真发人设的结构帧（status/tone/mode/reply），
+调度器在流式与整段两处只取 reply 字段进 TTS 与历史（frame_test.go
+覆盖）；/v1/look 改常驻直问大脑（API.md 已补常驻模式一节）；ASR
+网关后端改走 Omni 的 input_audio（ASR.md 第 9 节）。TTS 不动，仍是
+自研引擎与 Amika 的声音。验证在本机全链跑通（名字、回访、拍照、
+409、语音输入轮），已知质量账（抽取噪声、事实归属倒置）与数字全
+在 OMNI-INTEGRATION.md。

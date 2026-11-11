@@ -111,6 +111,24 @@ fp32 对照（拼接、默认 opt）：CER 同档（“click brown fox”、“t
 7. **aarch64**：`build-aarch64/asr_host` 已按附录的 clang 交叉编译法重建（含流式模式；这次的确切命令行补在下面附录里），QEMU cortex-a57 冒烟：s01 的 PCM 走流式加 EOF，出 1 段 `[0.480 1.760] Hello, how are you today?`，与 x86 逐字一致（QEMU 只验对错，load_s、asr_s 不作数）。适配进程的 aarch64 版是纯 Go 交叉编译，无系统依赖。
 8. **联调脚本同步**：`ui-proto/test-client.js` A 部分原来的桩断言（asr_final 回帧数）换成真识别断言（灌 s01 的 PCM 帧、ptt_end 后回的文本要含 hello 且不带 stub 字样），A 部分全过。跑前端时起进程的顺序变成：先 `asr_gateway`、再调度器、再页面服务器，UI.md 的跑法一节已同步。
 
+## 9. 网关后端换 Omni（2026-11-11 补记）
+
+第 8 节的网关形状一字未动，后端换了：`gateway/asr_gateway` 不再拉
+asr_host 子进程，改为把断好的段整段 WAV 发给常驻的 Omni 大脑服务
+器（llama.cpp 的 input_audio 输入，与 LFM3VL-SPIKE.md 附录 2 的
+ASR 门同一请求形状，温度 0）。断句改在网关内做能量 VAD（32 ms 帧
+RMS，默认阈值 500，800 ms 静音关段、200 ms 预卷、100 ms 尾垫、
+100 ms 最短段、30 s 段长上限），ptt_end 与断线都直接关段（不再有
+SIGUSR1）。新旗标：`-brain-url`（默认 http://127.0.0.1:18091）、
+`-vad-threshold`；旧的 `-asr-bin`/`-model-dir`/`-threads` 仍接受、
+忽略并记一行日志，deploy.sh 的起法不用改。能量 VAD 比 Silero
+简单：轻声起音可能被削、稳态噪声会把段挂住，这两条已知。asr_host
+与 Moonshine 模型原样保留在树里（回退路）。验证：测试音 s01、s03
+经网关形状（静音关段与 ptt_end 两条路）回的 asr_final 与真值逐字
+一致；本机（开发 VM）单段转写约 88 至 99 秒是这台机器的生成速度，
+不作设备数字；网关进程自身省掉了 asr_host 的约 161 MB 常驻。全文
+见 OMNI-INTEGRATION.md。
+
 ## 附：复现命令
 
 ```sh

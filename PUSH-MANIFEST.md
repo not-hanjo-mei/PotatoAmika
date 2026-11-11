@@ -490,3 +490,102 @@ ran on a scratch copy and the shipping sources are untouched.
 3. `docs/D8100-PORT.md` — closing update on the spike-result
    section: the split is done; only the on-device smoke test
    remains for the TTS host.
+
+# Round 7 — 2026-11-12: Rubens verdicts and the Omni integration (first round on `rubens`)
+
+## What changed and why
+
+1. `engine/src/packed_core.h` + `engine/src/gemv_bench.cpp` (new) +
+   `engine/CMakeLists.txt` — the SDOT GEMV promotion from
+   RUBENS-OPT: with `POTATO_GEMV_I8` unset, SDOT CPUs now run mode B
+   and mode A block-quantized at width 64 by default;
+   `POTATO_GEMV_I8=0` remains the exact pre-promotion opt-out.
+   `gemv_bench` is the tier's micro-bench, cited throughout
+   RUBENS-OPT.md; it builds for the NDK target, unlike `kbench`.
+2. `scheduler/` (`api.go`, `brain.go`, `config.go`, `servers.go`,
+   `session.go`, `vision.go`) + `scheduler/frame_test.go` (new) —
+   the LFM3-Omni integration: new config keys `brain_mmproj`
+   (vision resident in the brain server; `/v1/look` answers in
+   place, the unload/reload swap kept for the Minico fallback) and
+   `brain_thinking` (`"lfm3"` sends `enable_thinking=false` and
+   starts the server with `--reasoning off`); chat requests send
+   `cache_prompt`; the persona's structure frame
+   (status/tone/mode/reply) is extracted so only the reply field
+   reaches TTS and history, in both the streaming and the
+   whole-response paths, with `frame_test.go` covering the
+   extraction.
+3. `asr/gateway/main.go` — the gateway's backend is now the
+   resident Omni brain: energy-VAD segmentation in the gateway,
+   whole-segment WAV sent as `input_audio`. The `/ws/asr` contract
+   toward the adapter is unchanged, and the legacy flags are
+   accepted and ignored. `asr_host` and the Moonshine models stay
+   in the tree as the fallback path.
+4. `docs/` — new: `RUBENS-PROFILE.md`, `RUBENS-ACCEL.md`,
+   `RUBENS-OPT.md` (including the 2026-11-12 on-device A/B
+   results), `RUBENS-NPU-SPIKE.md` (including the on-device NNAPI
+   verdict), `LFM3VL-SPIKE.md` (including Addendum 3: the
+   6.2 tok/s generation figure corrected to a measured 13.5, and
+   the five-config thread/pinning sweep — `brain_threads` 4
+   unpinned is the device optimum), `OMNI-INTEGRATION.md`.
+   Updated: `API.md` (resident-mode `/v1/look`), `ASR.md` (§9,
+   gateway backend), `SCHEDULER.md` (Omni section).
+5. `README.md` — status section only: the rubens verdicts replace
+   the "next target selected" text. The upstream tail below the
+   PotatoAmika header is byte-identical (marker-to-EOF sha256
+   unchanged by this round).
+
+## Publication edits (staged copies only; originals untouched)
+
+- `docs/RUBENS-NPU-SPIKE.md` — the maintainer's private SSH domain
+  in the reachability paragraph replaced by a generic description
+  of the route.
+- `docs/LFM3VL-SPIKE.md` — the same domain, in the follow-up
+  addendum's route and probe lines, generalized the same way.
+- `docs/RUBENS-ACCEL.md` — the device's Termux UID value dropped;
+  the sentence keeps "Termux app UID".
+- `docs/ASR.md`, `docs/SCHEDULER.md` — the cross-reference to
+  OMNI-INTEGRATION.md normalized to the sibling filename for the
+  flat `docs/` layout.
+- `asr/gateway/main.go` — gofmt applied (comment reflow and field
+  alignment only; no logic change).
+
+## Held out / reverted
+
+- `scheduler/config.dev.json` (Omni profile) and
+  `scheduler/config.minico.json` (Minico fallback) stay
+  unpublished, per round 1's selection excluding dev configs:
+  both carry maintainer-machine absolute paths. The profiles ship
+  as code (`config.go` keys and comments) and documentation
+  (OMNI-INTEGRATION.md, SCHEDULER.md); the installed config
+  surface remains `deploy/scheduler.json.tmpl`.
+- NPU spike sources (`tts-engine/accel/`: `fold_wn.py`,
+  `nnapi_runner.cpp`, run scripts) and the LFM3VL spike harness
+  (`lfm3vl-spike/`) stay in the working tree this round; their
+  reports ship. The converted models and the runner binary are
+  red-line material regardless.
+- `tts-engine/host/src/dec_probe.cpp` and its CMakeLists target —
+  an NPU-spike throwaway that proved useless and is referenced by
+  nothing shipped: reverted in the working tree itself (file
+  deleted, target removed) rather than published.
+- `tts-engine/host/src/vits_bench.cpp` — an unwired dev bench (no
+  CMake target, no report citations): held out.
+- No `deploy/` or `ui-adapter/` changes: the published copies
+  already carry the round-2 slim and publication state, and the
+  working-tree copies differ only by being behind it.
+- `docs/ORT-FREE.md` and `docs/ANDROID-SPIKE.md` unchanged: their
+  working-tree deltas are exactly the spots earlier rounds
+  generalized in the published copies (the ORT-FREE paragraph
+  still names the private access domain in the original; the
+  published rewrite stands).
+
+## Red-line scan record (round 7)
+
+Scan over the round-7 delta (added lines and new files, round-1
+method): weight/model extensions 0, ELF/Mach-O/PE magic 0 (all
+files text), secrets sweep 0, private identifiers (access
+domains, machine paths, device UID) 0 after the publication edits
+above, persona filenames / `namedict.tsv` / `memory.json` 0,
+symlinks 0, all files valid UTF-8. Sanity checks from the repo
+copies: `engine/src/gemv_bench.cpp` compiles; scheduler `go vet`
+clean and `go test` passes (frame tests included); the ASR
+gateway builds.

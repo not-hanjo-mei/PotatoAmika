@@ -1,29 +1,33 @@
 # PotatoAmika
 
-**Status: the Mi 4c round is closed — it ran, and on performance it failed. Next target selected: a Dimensity 8100 handset, ported in Android userspace (plan: `docs/D8100-PORT.md`).**
+**Status: the Dimensity 8100 round (branch `rubens`) has its verdicts — the stack runs in Android userspace, the TTS engine's SDOT GEMV tier is on by default, the NPU route is a measured dead end, and one Omni model now serves as brain, eyes and ears.**
 PotatoAmika is an experiment, not finished software, so expect rough
-edges, missing pieces and no support. It was installed on its target
-handset (the Mi 4c below) on 2026-11-10, passed the installer's full
-self-test there, and then got a real trial by its owner. The system
-works end to end, but voice turns take minutes: after five rounds of
-on-device kernel work, medium-sentence TTS synthesis sits at RTF
-18.6–19.4 on the Snapdragon 808's Cortex-A57 cores, about 19x from
-real time, and that remaining gap is the SoC itself (ARMv8.0, no
-dot-product instructions) rather than kernel quality — the full
-record is `docs/ORT-FREE.md`, sections 7–15. The brain is also
-minutes-scale there (about 9 tok/s generation; a ~5 minute cold
-prefill of the 5.6k-token persona on the first turn). Both GPU
-routes were investigated and are closed on this device (Turnip has
-no Adreno 4xx support; the vendor OpenCL path probed 12–20x slower
-than the NEON CPU kernels). Verdict for this hardware round: a
-working port, a failed deployment. The next round is now scoped: the same stack, rebuilt for Android
-userspace on a Dimensity 8100 phone whose locked bootloader rules
-out the container route — plan and reasoning in
-`docs/D8100-PORT.md`. No port code exists yet; the first step is a
-test build of the TTS host against bionic. The engine was kept
-portable on purpose (runtime CPU dispatch, an fp32 baked-graph
-fallback), so the stack should carry onto the newer SoC without
-redesign.
+edges, missing pieces and no support. The Mi 4c round closed as a
+working port and a failed deployment (medium-sentence TTS at RTF
+18.6–19.4 on the Snapdragon 808; the full record is
+`docs/ORT-FREE.md`, sections 7–15). The same stack was then rebuilt
+for a Redmi K50 (Dimensity 8100, locked bootloader, Termux
+userspace — no container). The TTS host runs there with its SDOT
+GEMV tier enabled by default on capable CPUs (mode B plus mode A
+block-quantized at width 64); the on-device A/B against the
+previous binary is performance-neutral (RTF 7.49–8.07 vs 7.54–7.86
+at two threads), so the promotion stands on its numerics — record
+in `docs/RUBENS-OPT.md`. The APU route was measured and closed:
+NNAPI cannot run the 471-node vits decoder graph on this driver
+stack (two accelerator shims fail at two different stages), so vits
+stays on the hand-written CPU kernels (`docs/RUBENS-NPU-SPIKE.md`).
+The brain changed shape: LFM3-Omni-2B passed the replacement gates
+for chat, vision and speech recognition, and the scheduler now runs
+it as one resident server — vision answers in place instead of the
+unload/reload swap, the ASR gateway transcribes through it, and the
+self-built TTS engine still does the speaking (Omni's built-in
+voices are generic presets; the fine-tuned voice exists only here).
+On-device sweep: `brain_threads` 4, unpinned, is optimal — prefill
+22.7 tok/s, generation 13.5 tok/s, one ≈ 228 s cold persona prefill
+per server start, then cached; pinning gains nothing and 6–8
+threads collapse generation. Records: `docs/RUBENS-PROFILE.md`,
+`docs/RUBENS-ACCEL.md`, `docs/LFM3VL-SPIKE.md`,
+`docs/OMNI-INTEGRATION.md`.
 
 **PotatoAmika** is a ground-up, fully local reimplementation of
 [OpenAmika](https://github.com/zeekk0/OpenAmika)'s runtime. The original

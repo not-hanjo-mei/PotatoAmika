@@ -189,6 +189,15 @@ sentence_audio 的句子。
 的描述，不是用户陈述）。换载期间会话历史与记忆存储不受影响，它们
 都在调度器侧。
 
+常驻模式（2026-11-11，Omni 配置）：配置带 `brain_mmproj` 时大脑
+服务器自身带视觉投影，不再换载。/v1/look 直接问大脑，响应
+timings_ms 只有 vision_answer 与 total；没有 stop/reload 步骤，
+也就没有 500（恢复失败）一档；502 只表示答复本身失败，大脑全程
+在位。409 语义不变（回合进行中或另一个拍照进行中均拒绝，不排队）。
+/v1/chat 在拍照进行中回 503 的规则不变。healthz 的 vision 字段在
+常驻模式下随大脑在位为 true。Minico 回退配置（config.minico.json）
+不带 brain_mmproj，走上面写的换载流程，一字未改。
+
 ### GET /v1/memory
 
 当前记忆包列表（调试用）：`{"packets": [{"id": "...", "text": "..."}], "count": n}`。
