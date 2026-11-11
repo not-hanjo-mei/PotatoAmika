@@ -471,3 +471,22 @@ both changed files are plain UTF-8 text.
 
 Still no production code in the repo from this round: the spike
 ran on a scratch copy and the shipping sources are untouched.
+
+# Round 6 — 2026-11-11: free-only build split (first port code)
+
+## What changed and why
+
+1. `engine/CMakeLists.txt` + `engine/src/main.cpp` — the
+   `POTATO_FREE_ONLY` build option from the spike's remaining-
+   work list: with the option on, the ORT engine path is
+   compiled out of the TTS host and nothing links ONNX Runtime;
+   default off, and the dual-engine build's regression numbers
+   are unchanged (GPT 299/361, vits 0.959880). The repo copy of
+   `main.cpp` keeps its published `--root` default ("."); only
+   the free-only changes were applied to it, not the development
+   tree's local default.
+2. `docs/ANDROID-SPIKE.md` — the production split section
+   appended (verification numbers, bionic binary inspection).
+3. `docs/D8100-PORT.md` — closing update on the spike-result
+   section: the split is done; only the on-device smoke test
+   remains for the TTS host.

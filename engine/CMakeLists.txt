@@ -16,11 +16,25 @@ set_target_properties(onnxruntime PROPERTIES
   IMPORTED_LOCATION ${ORT_DIR}/lib/libonnxruntime.so
   INTERFACE_INCLUDE_DIRECTORIES ${ORT_DIR}/include)
 
+# POTATO_FREE_ONLY: build tts_host with the ORT engine path compiled out
+# (main.cpp guards on the macro of the same name; packed.h/vits_packed.h
+# are bypassed for packed_core.h) and no onnxruntime linkage. Default
+# OFF — the shipping dual-engine build is unchanged. See ANDROID-SPIKE.md.
+option(POTATO_FREE_ONLY "tts_host: free engine only, no ONNX Runtime" OFF)
+
 add_executable(tts_host src/main.cpp src/g2p.cpp src/vits_kernels.cpp src/free_engine.cpp)
-target_link_libraries(tts_host PRIVATE onnxruntime)
-set_target_properties(tts_host PROPERTIES
-  BUILD_RPATH ${ORT_DIR}/lib
-  INSTALL_RPATH ${ORT_DIR}/lib)
+if(POTATO_FREE_ONLY)
+  target_compile_definitions(tts_host PRIVATE POTATO_FREE_ONLY=1)
+  if(NOT ANDROID)
+    # bionic has pthread inside libc; there is no separate -lpthread.
+    target_link_libraries(tts_host PRIVATE pthread)
+  endif()
+else()
+  target_link_libraries(tts_host PRIVATE onnxruntime)
+  set_target_properties(tts_host PROPERTIES
+    BUILD_RPATH ${ORT_DIR}/lib
+    INSTALL_RPATH ${ORT_DIR}/lib)
+endif()
 
 add_executable(tf_check src/tf_check.cpp)
 target_link_libraries(tf_check PRIVATE onnxruntime)

@@ -5,7 +5,9 @@
 // from offline .rpk packs; prompt_encoder never runs at runtime.
 // Interface: resident process, stdin one JSON request per line, one wav file
 // per request into --outdir, one JSON result line on stdout per request.
+#ifndef POTATO_FREE_ONLY
 #include <onnxruntime_cxx_api.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -23,10 +25,17 @@
 #include "g2p.h"
 #include "json_min.h"
 #include "npz.h"
+#ifdef POTATO_FREE_ONLY
+// Free-only build: packed.h / vits_packed.h are the ORT custom-op glue
+// and are bypassed entirely; the free engine needs only the ORT-free
+// core (BlobStore, kernel pool) from packed_core.h.
+#include "packed_core.h"
+#else
 #include "packed.h"
+#include "vits_packed.h"
+#endif
 #include "patch.h"
 #include "rpk.h"
-#include "vits_packed.h"
 
 using Clock = std::chrono::steady_clock;
 static double ms_since(Clock::time_point t0) {
@@ -55,6 +64,7 @@ static void write_file(const std::string& path, const uint8_t* data, size_t n) {
 }
 
 // ---------------- model loading ----------------
+#ifndef POTATO_FREE_ONLY
 struct SessionPack {
     std::unique_ptr<Ort::Session> session;
     std::vector<std::string> in_names, out_names;
@@ -127,6 +137,7 @@ static Ort::Value i64_tensor(Ort::AllocatorWithDefaultOptions& alloc, const int6
     memcpy(v.GetTensorMutableData<int64_t>(), data, n * 8);
     return v;
 }
+#endif  // !POTATO_FREE_ONLY
 
 // ---------------- ORT-free engine state (--engine free) ----------------
 // The free engine runs the same packed-residency configuration as the
@@ -386,6 +397,9 @@ int main(int argc, char** argv) {
     if (opt_level != "all" && opt_level != "basic") { std::cerr << "--opt-level must be all or basic\n"; return 2; }
     if (engine != "ort" && engine != "free") { std::cerr << "--engine must be ort|free\n"; return 2; }
     bool engine_free = engine == "free";
+#ifdef POTATO_FREE_ONLY
+    if (!engine_free) { std::cerr << "this is a free-only build: --engine ort is not compiled in\n"; return 2; }
+#endif
     if (engine_free && gpt_bits != 4) { std::cerr << "--engine free supports --gpt-bits 4 only (packed graphs are W4)\n"; return 2; }
     if (engine_free && !emit_dir.empty()) { std::cerr << "--emit-models is ORT-path only\n"; return 2; }
     std::string scheme = gpt_bits == 4 ? "w4" : "w8";
@@ -404,17 +418,21 @@ int main(int argc, char** argv) {
             {"t2s_stage_decoder_fp32.onnx", "gpt_stage", "gpt_stage_w%d.npz", nullptr, &man},
             {"vits_wnfold.onnx", "sovits_vits", "sovits_vits_w4hybrid.npz", "w4hybrid", &man_hybrid},
         };
+#ifndef POTATO_FREE_ONLY
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "potato-tts-host");
         std::vector<SessionPack> sessions;
+#endif
         // Packed GPT state (stage 3): one descriptor pool per graph, all
         // backed by ONE content-addressed BlobStore (see packed.h), plus
         // name-bound sessions for specs 1/2.
+#ifndef POTATO_FREE_ONLY
         auto blob_store = std::make_shared<packed::BlobStore>();
         packed::WeightPool pool_f(blob_store), pool_s(blob_store), pool_v(blob_store);
         packed::NamedSession gpt_first_p, gpt_stage_p, vits_p;
         bool vits_packed = false;
         Ort::CustomOpDomain domain(nullptr);
         bool pool_ready = false;
+#endif
         cpu::log_features("host");
         std::cerr << "[load] gpt_bits=" << gpt_bits << " threads=" << threads
                   << " packed=" << (use_packed ? 1 : 0) << " arena=" << (no_arena ? "off" : "on")
@@ -474,6 +492,7 @@ int main(int argc, char** argv) {
                 fh.vits->set_packed_lookup(fh.pool_v->lookup());
             }
         }
+#ifndef POTATO_FREE_ONLY
         int spec_idx = 0;
         for (auto& gs : specs) {
             if (engine_free) break;
@@ -552,12 +571,15 @@ int main(int argc, char** argv) {
             sessions.push_back(make_session(env, patched, threads, no_arena, opt_level));
             std::cerr << "[load] session ready in " << (int)ms_since(t0) << " ms; rss " << rss_kb() / 1024 << " MB\n";
         }
+#endif  // !POTATO_FREE_ONLY
         // In packed mode with baked vits, sessions holds [encoder, vits];
         // with vits packed residency it holds [encoder] only; baked mode
         // holds all 4. vits_sess is only dereferenced when !vits_packed
         // (and never in free mode, which has no ORT sessions at all).
+#ifndef POTATO_FREE_ONLY
         SessionPack* vits_sess_p = nullptr;
         if (!engine_free) vits_sess_p = &(vits_packed ? sessions[0] : (use_packed ? sessions[1] : sessions[3]));
+#endif
         if (!emit_dir.empty()) { std::cerr << "[emit] patched models written to " << emit_dir << "\n"; return 0; }
 
         G2P g2p;
@@ -565,7 +587,9 @@ int main(int argc, char** argv) {
         Json index_doc = JsonParser(read_text(root + "/host/refpacks/index.json")).parse();
         std::cerr << "[load] g2p + refpack index ready; boot " << (int)ms_since(t_boot) << " ms; rss " << rss_kb() / 1024 << " MB\n";
 
+#ifndef POTATO_FREE_ONLY
         Ort::AllocatorWithDefaultOptions alloc;
+#endif
         std::map<std::string, std::map<std::string, RpkTensor>> refcache;
         auto get_ref = [&](const std::string& tag) -> const std::map<std::string, RpkTensor>& {
             auto it = refcache.find(tag);
@@ -617,7 +641,9 @@ int main(int argc, char** argv) {
 
                 // ---- GPT encoder ----
                 t0 = Clock::now();
+#ifndef POTATO_FREE_ONLY
                 std::vector<Ort::Value> enc_out;
+#endif
                 std::map<std::string, freeeng::Tensor> fenc_out;
                 int64_t plen = 0;
                 if (engine_free) {
@@ -631,7 +657,9 @@ int main(int argc, char** argv) {
                     ein.emplace("ssl_content", ft_from_rpk(ssl));
                     fenc_out = fh.enc->run(ein);
                     plen = fenc_out.at("prompts").shape[1];
-                } else {
+                }
+#ifndef POTATO_FREE_ONLY
+                else {
                     std::vector<Ort::Value> enc_in;
                     enc_in.push_back(i64_tensor(alloc, ref_seq.i64(), ref_seq.shape));
                     enc_in.push_back(i64_tensor(alloc, text_ids.data(), {1, L}));
@@ -641,6 +669,7 @@ int main(int argc, char** argv) {
                     enc_out = sessions[0].session->Run(Ort::RunOptions{nullptr}, sessions[0].in_ptrs.data(), enc_in.data(), enc_in.size(), sessions[0].out_ptrs.data(), sessions[0].out_names.size());
                     plen = enc_out[1].GetTensorTypeAndShapeInfo().GetShape()[1];
                 }
+#endif
                 double t_enc = ms_since(t0);
 
                 // ---- first stage + decode loop ----
@@ -690,7 +719,9 @@ int main(int argc, char** argv) {
                     }
                     t_dec = ms_since(t0);
                     fh.first->release_arena();  // stage plans own the live state now
-                } else if (use_packed) {
+                }
+#ifndef POTATO_FREE_ONLY
+                else if (use_packed) {
                     // Name-bound protocol (same as tf_check): state tensors are
                     // carried by graph input/output name, weights come from
                     // each graph's own pool as zero-copy views on every Run.
@@ -780,6 +811,7 @@ int main(int argc, char** argv) {
                     }
                     t_dec = ms_since(t0);
                 }
+#endif
 
                 // pred_semantic = tokens before first EOS
                 std::vector<int64_t> pred;
@@ -788,6 +820,7 @@ int main(int argc, char** argv) {
 
                 // ---- vits ----
                 t0 = Clock::now();
+#ifndef POTATO_FREE_ONLY
                 std::vector<Ort::Value> vits_in;
                 vits_in.push_back(i64_tensor(alloc, text_ids.data(), {1, L}));
                 vits_in.push_back(i64_tensor(alloc, pred.data(), {1, 1, (int64_t)pred.size()}));
@@ -795,6 +828,7 @@ int main(int argc, char** argv) {
                 vits_in.push_back(f32_tensor(alloc, ref.at("ge_advanced").f32(), ref.at("ge_advanced").shape));
                 std::vector<Ort::Value> vout;
                 Ort::Value vout_packed(nullptr);
+#endif
                 std::vector<float> audio_free;
                 const float* audio = nullptr;
                 size_t n_audio = 0;
@@ -811,7 +845,9 @@ int main(int argc, char** argv) {
                     audio = audio_free.data();
                     n_audio = audio_free.size();
                     fh.vits->release_arena();  // audio is copied out; drop the vits peak
-                } else if (vits_packed) {
+                }
+#ifndef POTATO_FREE_ONLY
+                else if (vits_packed) {
                     std::map<std::string, Ort::Value> vin;
                     vin.emplace("text_seq", std::move(vits_in[0]));
                     vin.emplace("pred_semantic", std::move(vits_in[1]));
@@ -828,6 +864,7 @@ int main(int argc, char** argv) {
                     audio = vout[0].GetTensorData<float>();
                     n_audio = vout[0].GetTensorTypeAndShapeInfo().GetElementCount();
                 }
+#endif
                 double t_vits = ms_since(t0);
 
                 // Output stage (DEESS.md v2): deess2air before silence trimming.

@@ -135,3 +135,124 @@ edits below exist only in the copy.
 Total: roughly one day for a free-only bionic `tts_host` built and
 smoke-tested on the device, dominated by the `main.cpp` split and
 on-device validation. The engine core itself needed no porting.
+# Production split (2026-11-11)
+
+The free-only build option from the estimate above is implemented in the
+shipping sources. No stub is involved: with the option on, the ORT code
+is preprocessed out and nothing references `OrtGetApiBase`.
+
+## Mechanism
+
+- **CMake option `POTATO_FREE_ONLY`** (default OFF) in `host/CMakeLists.txt`.
+  ON: `tts_host` gets `-DPOTATO_FREE_ONLY=1`, links `pthread` on
+  non-Android targets only (bionic has pthread inside libc; the Android
+  branch of the option adds no `-lpthread`, which does not exist there),
+  and does **not** link the imported `onnxruntime` target or set the ORT
+  RPATH. OFF: the previous link line and RPATH, unchanged.
+- **`src/main.cpp`** guards on the macro of the same name:
+  - the `<onnxruntime_cxx_api.h>` include is compiled out;
+  - `packed.h` / `vits_packed.h` (the ORT custom-op glue) are bypassed —
+    under the macro, main.cpp includes `packed_core.h` instead, which is
+    all the free path needs (`packed::BlobStore`, `packed::set_kernel_threads`);
+    `packed.h` itself is untouched;
+  - the ORT-only host glue (`SessionPack`, `load_and_patch`,
+    `make_session`, `f32_tensor`, `i64_tensor`) is one guarded region;
+  - in `main()`: the `Ort::Env`/sessions declarations, the ORT packed
+    pools + `NamedSession`s + custom-op domain, the whole specs loading
+    loop, `vits_sess_p`, and the request-loop `Ort::Allocator` are
+    guarded out;
+  - the three runtime branches (encoder, first+decode, vits) keep their
+    free branch unguarded and have their ORT `else` branches guarded, so
+    with the macro defined each collapses to the free branch alone;
+    with it undefined the preprocessed token stream is the original code;
+  - a free-only binary rejects `--engine ort` at startup with an explicit
+    message instead of failing later.
+- The engine sources (`free_engine.cpp`, `vits_kernels.cpp`, `g2p.cpp`,
+  `packed_core.h`, …) are **not modified at all** — as the spike
+  predicted, the split is entirely in the host glue and the build file.
+
+## Build commands
+
+Default (dual-engine, option OFF) and free-only x86-64, from `host/`:
+
+```
+cmake -S . -B build-verify      -DCMAKE_BUILD_TYPE=Release
+cmake --build build-verify      -j2 --target tts_host tf_check_free vits_check_free
+
+cmake -S . -B build-verify-free -DCMAKE_BUILD_TYPE=Release -DPOTATO_FREE_ONLY=ON
+cmake --build build-verify-free -j2 --target tts_host tf_check_free vits_check_free
+```
+
+Free-only aarch64 bionic, NDK r27.2 toolchain file:
+
+```
+cmake -S . -B build-verify-ndk \
+  -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+  -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+  -DPOTATO_FREE_ONLY=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build-verify-ndk -j2 --target tts_host
+```
+
+where `$NDK` is the local NDK r27.2 tree (`version.mk`: 27.2). One local
+environment repair was needed first: this NDK tree was missing its
+top-level `source.properties`, which the toolchain file parses for the
+revision; a standard one (`Pkg.Revision = 27.2.11579264`) was written
+into the tools tree (not the project tree) before configuring.
+
+## Regression results (x86-64, this machine, 4 threads)
+
+Identical in the default build and in the free-only build — same
+binaries' check tools from each tree:
+
+- `tf_check_free --mode packed --ref host/logits_packed_x86.bin`:
+  `tf_agree 299 / tf_total 361`, `ref_argmax_agree 361`,
+  `ref_max_logit_diff 8.86917e-05` — the established numbers, unmoved.
+- `vits_check_free`: `free_packed_vs_fp32 corr 0.959880`
+  (relrms 0.293293, maxerr 0.339176), `free_baked_vs_fp32 0.959881`,
+  layers free_packed vs free_baked worst_corr 1.000000 over 226 — the
+  established numbers, unmoved.
+- Host-level smoke test, default build `--engine free` vs free-only
+  build, same request (`"Hello, this is a test of the free engine."`,
+  tag neutral1, seed 42, 4 threads): token sequences identical
+  (69 steps), durations identical (2.73294 s), and the output wavs are
+  byte-identical (sha256
+  `4ddc1493aec97cc56e31c78dc85ac647ed26c065232b9441b4650f48c1c240ee`).
+- Free-only x86 `tts_host`: `ldd` shows only libstdc++/libm/libgcc_s/
+  libc; no ORT symbols (an `nm | grep -i ort` sweep matches only
+  unrelated `std::*sort*` / `__cxa_guard_abort` names).
+
+## Bionic binary inspection
+
+`build-verify-ndk/tts_host` (the bionic binary still has not been *run*
+anywhere — no bionic runtime on this machine; link/symbol inspection is
+the bar, as in the spike):
+
+- ELF64, AArch64, DYN; compiled `-O3` (plus `-g` from the NDK toolchain
+  defaults — see the size note below).
+- Undefined symbols: **no `OrtGetApiBase`** (an undefined-symbol sweep
+  for "ort" matches only `abort` and `android_set_abort_message`).
+- `readelf -d` NEEDED: `libm.so`, `libdl.so`, `libc.so` — bionic system
+  libraries only, no `libonnxruntime`.
+- Stripped size: **1,099,728 B** (unstripped 11,943,072 B — the NDK
+  Release configure keeps `-g` and does not set
+  `CMAKE_BUILD_TYPE`-driven strip; the stripped figure is the
+  comparable one). This is *smaller* than the spike's hand-rolled
+  stripped build (1,434,088 B): the CMake build uses
+  `-ffunction-sections`/`-Wl,--gc-sections` from the toolchain, which
+  the spike's manual compile line did not.
+
+## Deviations from the spike's estimate
+
+- The split itself took well under the estimated half day; it is
+  ifdef-guards in one file plus one CMake option, exactly the
+  "mechanical" outcome the spike predicted. The on-device smoke test
+  (the other estimated half day) is unchanged in scope and still
+  pending a device.
+- Two build-system details the spike's manual compile line never hit:
+  (1) `-lpthread` must not be linked under bionic (no separate
+  library) — handled by the `NOT ANDROID` condition in the option;
+  (2) this machine's NDK tree lacked `source.properties` and the
+  toolchain file refuses to configure without it (environment repair,
+  recorded above; not a project change).
+- Verification build trees (`build-verify*`) were removed after the
+  runs; the numbers above are from their outputs.

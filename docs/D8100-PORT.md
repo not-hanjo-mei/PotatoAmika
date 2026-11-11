@@ -104,3 +104,12 @@ Remaining tts_host work is mechanical: split the ORT path out
 of the main file behind a build option (about half a day,
 estimated), then the on-device smoke test (about half a day,
 estimated). Full record: `docs/ANDROID-SPIKE.md`.
+
+Update (2026-11-11, later): the split is done. `tts_host` now
+has a `POTATO_FREE_ONLY` CMake option that compiles the ORT
+path out (default off; the dual-engine build is unchanged and
+its regression numbers did not move). The free-only bionic
+binary was rebuilt and re-inspected: no ORT symbols, bionic
+system libraries only, 1,099,728 B stripped. What remains for
+the TTS host is only the on-device smoke test. Record:
+`docs/ANDROID-SPIKE.md`, production split section.
