@@ -11,11 +11,16 @@ import (
 type Config struct {
 	Listen string `json:"listen"` // HTTP listen address for the frontend API
 
-	// Brain (Minico via llama-server).
+	// Brain (llama-server). Two profiles exist as pure config: Minico
+	// (brain_thinking "effort", no mmproj) and LFM3-Omni (brain_thinking
+	// "lfm3", brain_mmproj set) — see config.dev.json (Omni) and
+	// config.minico.json (fallback).
 	BrainURL       string `json:"brain_url"`        // attach mode: existing llama-server
 	BrainSpawn     bool   `json:"brain_spawn"`      // spawn llama-server ourselves
 	LlamaServerBin string `json:"llama_server_bin"` // path to llama-server binary
 	BrainModel     string `json:"brain_model"`      // GGUF path
+	BrainMmproj    string `json:"brain_mmproj"`     // mmproj GGUF loaded with the brain (Omni: vision+audio live in the brain server)
+	BrainThinking  string `json:"brain_thinking"`   // "effort" (Minico reasoning_effort kwargs) | "lfm3" (enable_thinking=false + --reasoning off)
 	BrainPort      int    `json:"brain_port"`
 	BrainCtx       int    `json:"brain_ctx"`     // llama-server -c
 	BrainThreads   int    `json:"brain_threads"` // llama-server -t
@@ -27,11 +32,13 @@ type Config struct {
 	EmbedPort    int    `json:"embed_port"`
 	EmbedThreads int    `json:"embed_threads"`
 
-	// Vision (LFM2.5-VL via a third llama-server, loaded on demand only:
-	// its ~685 MB peak does not fit next to the resident set, so a photo
+	// Vision. Two modes: resident (brain_mmproj set — the brain server
+	// itself answers photos, no unload/reload cycle) and the legacy swap
+	// (LFM2.5-VL via a third llama-server, loaded on demand only: its
+	// ~685 MB peak does not fit next to the resident set, so a photo
 	// request stops brain+embed, runs vision, then restores them; see
-	// vision.go and BUDGET.md). Empty model paths = vision disabled.
-	VisionModel     string `json:"vision_model"`      // GGUF path
+	// vision.go and BUDGET.md). Neither configured = vision disabled.
+	VisionModel     string `json:"vision_model"`      // GGUF path (swap mode only)
 	VisionMmproj    string `json:"vision_mmproj"`     // mmproj GGUF path
 	VisionPort      int    `json:"vision_port"`       // llama-server port while loaded
 	VisionCtx       int    `json:"vision_ctx"`        // llama-server -c

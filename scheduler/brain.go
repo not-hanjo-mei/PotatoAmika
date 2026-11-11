@@ -12,8 +12,9 @@ import (
 	"time"
 )
 
-// Brain is a client for a llama.cpp llama-server running Minico-M1-1105.
-// It also talks to a second llama-server instance for embeddings (Jina).
+// Brain is a client for a llama.cpp llama-server running the chat model
+// (Minico-M1-1105 or LFM3-Omni-2B, per config). It also talks to a second
+// llama-server instance for embeddings (Jina).
 type Brain struct {
 	base  string // chat/completions server
 	embed string // embedding server (may be "")
@@ -75,6 +76,56 @@ func stripThink(s string) string {
 	return strings.Trim(s, " \t\r\n")
 }
 
+// surfaceFrame detects the persona's structured surface frame:
+//
+//	status: <...>
+//	tone: <...>
+//	mode: <...>
+//	reply: <the spoken text, possibly several lines>
+//
+// The persona text instructs this frame. Minico never actually emitted
+// it (its scheduler replies were plain sentences), but LFM3-Omni follows
+// the instruction and does. framed reports whether the text starts with
+// the frame header; hasReply whether the reply field has appeared yet
+// (mid-stream it may not have); reply is the reply field's content.
+func surfaceFrame(s string) (reply string, framed bool, hasReply bool) {
+	t := strings.TrimLeft(s, " \t\r\n")
+	first, _, _ := strings.Cut(t, "\n")
+	if !strings.HasPrefix(first, "status:") {
+		return "", false, false
+	}
+	for off := 0; off < len(t); {
+		line := t[off:]
+		if nl := strings.IndexByte(line, '\n'); nl >= 0 {
+			line = line[:nl]
+		}
+		if strings.HasPrefix(line, "reply:") {
+			return strings.TrimSpace(t[off+len("reply:"):]), true, true
+		}
+		if nl := strings.IndexByte(t[off:], '\n'); nl >= 0 {
+			off += nl + 1
+		} else {
+			break
+		}
+	}
+	return "", true, false
+}
+
+// surfaceText is the full post-processing for surface replies: stripThink,
+// then, when the model emitted the surface frame, keep only its reply
+// field (the frame's own tone/status lines are protocol, not speech —
+// the scheduler's tone still comes from the separate ClassifyTone call,
+// per the settled design). A frame whose reply field never arrived
+// (truncated generation) falls back to the stripped raw text rather
+// than to silence.
+func surfaceText(s string) string {
+	t := stripThink(s)
+	if reply, framed, hasReply := surfaceFrame(t); framed && hasReply {
+		return reply
+	}
+	return t
+}
+
 type chatRequest struct {
 	Messages           []chatMessage   `json:"messages"`
 	MaxTokens          int             `json:"max_tokens"`
@@ -82,8 +133,21 @@ type chatRequest struct {
 	TopK               int             `json:"top_k,omitempty"`
 	RepeatPenalty      float64         `json:"repeat_penalty,omitempty"`
 	Stream             bool            `json:"stream"`
+	CachePrompt        bool            `json:"cache_prompt,omitempty"`
 	ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs,omitempty"`
 	ResponseFormat     json.RawMessage `json:"response_format,omitempty"`
+}
+
+// thinkingKwargs maps the scheduler's effort levels onto the chat
+// template switches of the configured brain. Minico ("effort") takes
+// reasoning_effort; LFM3-Omni ("lfm3") is a non-reasoning model whose
+// template switch is enable_thinking — the spike's gated probes all ran
+// with it off, so every effort level maps to off there.
+func (b *Brain) thinkingKwargs(effort string) map[string]any {
+	if b.cfg.BrainThinking == "lfm3" {
+		return map[string]any{"enable_thinking": false}
+	}
+	return map[string]any{"reasoning_effort": effort}
 }
 
 func (b *Brain) post(ctx context.Context, path string, body any) (*http.Response, error) {
@@ -111,7 +175,8 @@ func (b *Brain) ReplyStream(ctx context.Context, msgs []chatMessage, onText func
 		TopK:               b.cfg.ReplyTopK,
 		RepeatPenalty:      b.cfg.ReplyRepeatPen,
 		Stream:             true,
-		ChatTemplateKwargs: map[string]any{"reasoning_effort": "off"},
+		CachePrompt:        true,
+		ChatTemplateKwargs: b.thinkingKwargs("off"),
 	}
 	resp, err := b.post(ctx, "/v1/chat/completions", body)
 	if err != nil {
@@ -152,9 +217,9 @@ func (b *Brain) ReplyStream(ctx context.Context, msgs []chatMessage, onText func
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return stripThink(raw.String()), err
+		return surfaceText(raw.String()), err
 	}
-	return stripThink(raw.String()), nil
+	return surfaceText(raw.String()), nil
 }
 
 // chatOnce is a non-streaming completion used for the small side calls
@@ -167,7 +232,8 @@ func (b *Brain) chatOnce(ctx context.Context, msgs []chatMessage, maxTokens int,
 		TopK:               b.cfg.ReplyTopK,
 		RepeatPenalty:      b.cfg.ReplyRepeatPen,
 		Stream:             false,
-		ChatTemplateKwargs: map[string]any{"reasoning_effort": effort},
+		CachePrompt:        true,
+		ChatTemplateKwargs: b.thinkingKwargs(effort),
 		ResponseFormat:     responseFormat,
 	}
 	resp, err := b.post(ctx, "/v1/chat/completions", body)

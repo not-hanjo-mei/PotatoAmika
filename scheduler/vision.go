@@ -9,25 +9,30 @@ import (
 	"time"
 )
 
-// Vision flow (checklist item 6, BUDGET.md 眼睛一节): the vision model's
-// ~685 MB peak does not fit next to the resident set (~290-330 MB free on
-// the phone), so a photo is a swap, not a side load:
+// Vision flow (checklist item 6, BUDGET.md 眼睛一节) has two modes:
 //
-//	stop brain+embed -> load vision -> answer -> unload vision -> reload brain+embed
+//   - Resident (Omni profile, brain_mmproj set): the brain server has
+//     its mmproj loaded and answers the photo itself. No unload/reload
+//     cycle, no restore step; the brain never goes away.
+//   - Swap (Minico fallback profile): the vision model's ~685 MB peak
+//     does not fit next to the resident set (~290-330 MB free on the
+//     phone), so a photo is a swap, not a side load:
 //
-// History and the memory store live in the scheduler, not in the
-// llama-server processes, so the swap loses no conversation state; the
-// reload uses exactly the startup arguments (12k context, full persona
-// is scheduler-side anyway).
+//     stop brain+embed -> load vision -> answer -> unload vision -> reload brain+embed
 //
-// Safety rules:
+//     History and the memory store live in the scheduler, not in the
+//     llama-server processes, so the swap loses no conversation state;
+//     the reload uses exactly the startup arguments (12k context, full
+//     persona is scheduler-side anyway).
+//
+// Safety rules (both modes unless noted):
 //   - A turn in flight refuses the photo (a half-spoken reply is never
-//     cut off by an unload).
-//   - While a swap runs, new turns are refused up front (RunTurn guard).
-//   - Every failure after the stop step still restores brain+embed
-//     before the error is returned; the restore runs on a fresh context
-//     so a cancelled or timed-out photo request cannot strand the
-//     machine without a brain.
+//     cut off).
+//   - While a photo runs, new turns are refused up front (RunTurn guard).
+//   - Swap mode only: every failure after the stop step still restores
+//     brain+embed before the error is returned; the restore runs on a
+//     fresh context so a cancelled or timed-out photo request cannot
+//     strand the machine without a brain.
 
 type LookResult struct {
 	Answer    string             `json:"answer"`
@@ -63,7 +68,11 @@ func (m *serverManager) describe(ctx context.Context, question, mime, imgB64 str
 		Temperature: 0.2,
 		Stream:      false,
 	}
-	resp, err := m.vision.post(ctx, "/v1/chat/completions", body)
+	client := m.vision
+	if m.visionResident() {
+		client = m.brain // resident mode: the brain server itself has the mmproj
+	}
+	resp, err := client.post(ctx, "/v1/chat/completions", body)
 	if err != nil {
 		return "", err
 	}
@@ -104,14 +113,29 @@ func (o *Orchestrator) restoreAfterVision(res *LookResult) error {
 	return err
 }
 
+// recordLook appends the photo round to the session history, so
+// follow-up turns can refer to what was shown. Memory extraction is not
+// run for it: the answer is the vision model's description, not user
+// testimony.
+func (o *Orchestrator) recordLook(sess *Session, question, answer string) {
+	if sess == nil {
+		return
+	}
+	sess.mu.Lock()
+	sess.history = append(sess.history,
+		chatMessage{Role: "user", Content: "(showed a photo) " + question},
+		chatMessage{Role: "assistant", Content: answer})
+	sess.mu.Unlock()
+}
+
 // Look runs one photo request end to end. The returned status is the
 // HTTP status the API layer should use: 200 on success, 409 when a turn
 // or another photo is in progress, 503 when vision is not configured,
-// 502 when the swap or the model failed (brain+embed already restored),
-// 500 only when the restore itself failed.
+// 502 when the model failed (swap mode: brain+embed already restored),
+// 500 only when a swap-mode restore itself failed.
 func (o *Orchestrator) Look(ctx context.Context, sess *Session, question, mime, imgB64 string) (*LookResult, int, error) {
 	if o.mgr == nil || !o.mgr.visionConfigured() {
-		return nil, 503, fmt.Errorf("vision not configured (needs vision_model, vision_mmproj and spawned brain+embed)")
+		return nil, 503, fmt.Errorf("vision not configured (needs brain_mmproj, or vision_model+vision_mmproj and spawned brain+embed)")
 	}
 	if !o.swapMu.TryLock() {
 		return nil, 409, fmt.Errorf("another photo request is already in progress")
@@ -125,6 +149,23 @@ func (o *Orchestrator) Look(ctx context.Context, sess *Session, question, mime, 
 
 	res := &LookResult{TimingsMs: map[string]float64{}}
 	t0 := time.Now()
+
+	if o.mgr.visionResident() {
+		// Resident mode: the brain server answers in place. Nothing is
+		// stopped or restored; the only timings are the ask itself.
+		askCtx, cancel := context.WithTimeout(ctx, time.Duration(o.cfg.VisionTimeoutS)*time.Second)
+		t := time.Now()
+		answer, aerr := o.mgr.describe(askCtx, question, mime, imgB64)
+		cancel()
+		res.TimingsMs["vision_answer"] = msSince(t)
+		if aerr != nil {
+			return res, 502, fmt.Errorf("vision answer failed: %v", aerr)
+		}
+		res.Answer = answer
+		res.TimingsMs["total"] = msSince(t0)
+		o.recordLook(sess, question, answer)
+		return res, 200, nil
+	}
 
 	t := time.Now()
 	o.mgr.stopBrainEmbed()
@@ -156,15 +197,6 @@ func (o *Orchestrator) Look(ctx context.Context, sess *Session, question, mime, 
 	res.Answer = answer
 	res.TimingsMs["total"] = msSince(t0)
 
-	// The photo round joins the session history, so follow-up turns can
-	// refer to what was shown. Memory extraction is not run for it: the
-	// answer is the vision model's description, not user testimony.
-	if sess != nil {
-		sess.mu.Lock()
-		sess.history = append(sess.history,
-			chatMessage{Role: "user", Content: "(showed a photo) " + question},
-			chatMessage{Role: "assistant", Content: answer})
-		sess.mu.Unlock()
-	}
+	o.recordLook(sess, question, answer)
 	return res, 200, nil
 }

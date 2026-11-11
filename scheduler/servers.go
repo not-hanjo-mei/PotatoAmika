@@ -89,18 +89,41 @@ func newServerManager(cfg Config, brain *Brain) *serverManager {
 	return m
 }
 
-// visionConfigured reports whether the on-demand vision flow can run:
-// it needs model files configured and ownership of the brain and embed
-// processes (attach mode cannot stop servers it did not spawn).
+// visionResident reports whether vision lives inside the brain server
+// (Omni profile: the brain was spawned with its mmproj, so the same
+// process that chats also answers photos and transcribes audio).
+func (m *serverManager) visionResident() bool {
+	return m != nil && m.cfg.BrainMmproj != ""
+}
+
+// visionConfigured reports whether the vision flow can run at all:
+// either resident in the brain (brain_mmproj set), or the legacy swap,
+// which needs model files configured and ownership of the brain and
+// embed processes (attach mode cannot stop servers it did not spawn).
 func (m *serverManager) visionConfigured() bool {
-	return m != nil && m.cfg.VisionModel != "" && m.cfg.VisionMmproj != "" &&
+	if m == nil {
+		return false
+	}
+	if m.cfg.BrainMmproj != "" {
+		return true
+	}
+	return m.cfg.VisionModel != "" && m.cfg.VisionMmproj != "" &&
 		m.cfg.BrainSpawn && m.cfg.EmbedSpawn
 }
 
 func (m *serverManager) brainArgs() []string {
-	return []string{"-m", m.cfg.BrainModel, "-c", itoa(m.cfg.BrainCtx),
+	args := []string{"-m", m.cfg.BrainModel, "-c", itoa(m.cfg.BrainCtx),
 		"--host", "127.0.0.1", "--port", itoa(m.cfg.BrainPort),
 		"-t", itoa(m.cfg.BrainThreads), "--jinja"}
+	if m.cfg.BrainMmproj != "" {
+		args = append(args, "--mmproj", m.cfg.BrainMmproj)
+	}
+	if m.cfg.BrainThinking == "lfm3" {
+		// Mirror the spike's gated setup: reasoning off at the server
+		// level too (requests also send enable_thinking=false).
+		args = append(args, "--reasoning", "off")
+	}
+	return args
 }
 
 func (m *serverManager) embedArgs() []string {

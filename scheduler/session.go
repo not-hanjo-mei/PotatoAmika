@@ -265,15 +265,35 @@ func (sp *sentenceSplitter) Flush() []string {
 // given that Minico's leaked narration ends with a literal </think>: nothing
 // is releasable until a think marker resolves, except in long marker-free
 // output where the leak pattern would already have shown itself. At stream
-// end the caller uses stripThink on the whole buffer instead.
+// end the caller uses surfaceText on the whole buffer instead.
+//
+// The same hold applies to the persona's surface frame (LFM3-Omni emits
+// status:/tone:/mode: header lines before the reply field): while a frame
+// is in progress, only its reply field is releasable, and only once the
+// "reply:" line has arrived — the header lines are never spoken.
 func releasableText(raw string) string {
-	if strings.Contains(raw, "</think>") || strings.Contains(raw, "<think>") {
-		return stripThink(raw)
+	var resolved string
+	switch {
+	case strings.Contains(raw, "</think>") || strings.Contains(raw, "<think>"):
+		resolved = stripThink(raw)
+	case len(raw) > 400:
+		resolved = raw
+	default:
+		// Short, marker-free: releasable only if it already is a frame
+		// whose reply field has started (that field grows by appending,
+		// so what is released stays a prefix of the final reply).
+		if reply, framed, hasReply := surfaceFrame(strings.TrimSpace(raw)); framed && hasReply {
+			return reply
+		}
+		return ""
 	}
-	if len(raw) > 400 {
-		return raw
+	if reply, framed, hasReply := surfaceFrame(strings.TrimSpace(resolved)); framed {
+		if hasReply {
+			return reply
+		}
+		return "" // frame header still arriving; hold everything
 	}
-	return ""
+	return resolved
 }
 
 // RunTurn executes one full turn: recall, generate (streaming), classify
@@ -282,7 +302,7 @@ func releasableText(raw string) string {
 func (o *Orchestrator) RunTurn(ctx context.Context, sess *Session, userText string) (*TurnResult, error) {
 	if o.swapping.Load() {
 		return &TurnResult{SessionID: sess.id, TimingsMs: map[string]float64{}},
-			fmt.Errorf("vision in progress: the brain is temporarily unloaded for a photo, try again shortly")
+			fmt.Errorf("vision in progress: try again shortly")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	ts := &turnState{cancel: cancel}
@@ -416,7 +436,7 @@ func (o *Orchestrator) RunTurn(ctx context.Context, sess *Session, userText stri
 	}
 	// Release whatever the streaming guard held back.
 	if reply == "" {
-		reply = stripThink(rawAll.String())
+		reply = surfaceText(rawAll.String())
 	}
 	if len(reply) > released.Len() {
 		handleSentences(splitter.Feed(reply[released.Len():]))

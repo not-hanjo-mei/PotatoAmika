@@ -83,7 +83,7 @@ func (a *apiServer) chat(w http.ResponseWriter, r *http.Request) {
 		body.SessionID = "default"
 	}
 	if a.orch.swapping.Load() {
-		writeJSON(w, 503, map[string]any{"error": "vision in progress: the brain is temporarily unloaded for a photo, try again shortly"})
+		writeJSON(w, 503, map[string]any{"error": "vision in progress: try again shortly"})
 		return
 	}
 	sess := a.orch.session(body.SessionID)
