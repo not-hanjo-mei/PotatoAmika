@@ -85,6 +85,13 @@ void conv_transpose1d_fast(const float* X, int64_t N, int64_t Ci, int64_t L,
                            int64_t O, int64_t K, int64_t stride, int64_t pad_l, int64_t dil,
                            int64_t Tout, const float* bias, float* Y);
 
+// Bench/diagnostics hook: force the conv tile choice (-1 = auto,
+// 0 = generic, 1 = NEON; the NEON choice still requires the runtime
+// NEON feature and the window precondition). Env POTATO_VITS_TILE=
+// generic|neon is the process-level equivalent. Production code
+// never calls this; it exists so one binary can A/B both tiles.
+void vits_tile_override(int v);
+
 // Gather over a packed table (axis 0): out[..., :] = dequant(table[idx]).
 void gather_packed(const uint8_t* pk, const float* sc, const uint8_t* ze, int mode,
                    int64_t rows, int64_t cols, const int64_t* idx, int64_t nidx, float* Y);

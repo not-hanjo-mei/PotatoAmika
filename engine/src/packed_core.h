@@ -25,6 +25,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -34,8 +35,40 @@
 #include <unordered_map>
 #include <vector>
 
+#include "cpu.h"
 #include "json_min.h"
 #include "npz.h"
+
+// NEON tier (aarch64): selected at RUNTIME via cpu::features().neon, per
+// the cpu.h portability contract; the scalar implementations remain the
+// floor and the fallback for shapes the vector path does not cover.
+// POTATO_NO_NEON at compile time forces the scalar path everywhere; it
+// exists to A/B-validate the vector kernels on the same target build.
+//
+// The GEMV tier specifically is OPT-IN at runtime (POTATO_NEON_GEMV=1):
+// measured on the A57 target (kbench, 2026-11-10) the hand-written
+// NEON GEMV is ~24% SLOWER than the scalar path, because clang -O2
+// already autovectorizes the scalar GEMV loop (17 FMLA inside) and the
+// explicit version loses. Scalar is therefore the aarch64 default for
+// GEMV until a faster variant exists. The vits conv tile is a
+// different story (its scalar form does NOT autovectorize) and stays
+// default-on; see vits_kernels.cpp.
+#if defined(__aarch64__) && !defined(POTATO_NO_NEON)
+#define POTATO_PACKED_NEON 1
+#include <arm_neon.h>
+#else
+#define POTATO_PACKED_NEON 0
+#endif
+
+#if POTATO_PACKED_NEON
+inline bool neon_gemv_enabled() {
+    static const bool on = [] {
+        const char* e = std::getenv("POTATO_NEON_GEMV");
+        return e && e[0] == '1';
+    }();
+    return on;
+}
+#endif
 
 namespace packed {
 
@@ -108,14 +141,125 @@ inline void chunk(int idx, int n, int64_t total, F&& f) {
 // X: (M, K) row-major fp32. Y: (M, D) row-major fp32, accumulators start at
 // bias (or 0). pk/sc/ze describe W in its stored (rows, cols) view.
 
+// ---------------- NEON kernels (aarch64, ARMv8.0 baseline) ----------------
+#if POTATO_PACKED_NEON
+
+// Expand 16 packed bytes (32 nibbles, high nibble first) into 8
+// float32x4_t in element order. The shift/and split produces separate
+// high/low nibble planes; vzipq interleaves them back into the packed
+// layout's (2b, 2b+1) element order; widening then runs u8 -> u16 ->
+// u32 -> fp32. Plain ARMv8.0 ASIMD only: no dot product, no fp16
+// arithmetic (the A57 target has neither).
+inline void expand_w4_32(const uint8_t* p, float32x4_t* out) {
+    uint8x16_t v = vld1q_u8(p);
+    uint8x16x2_t z = vzipq_u8(vshrq_n_u8(v, 4), vandq_u8(v, vdupq_n_u8(0x0F)));
+    for (int h = 0; h < 2; h++) {
+        uint16x8_t w0 = vmovl_u8(vget_low_u8(z.val[h]));
+        uint16x8_t w1 = vmovl_u8(vget_high_u8(z.val[h]));
+        out[4 * h + 0] = vcvtq_f32_u32(vmovl_u16(vget_low_u16(w0)));
+        out[4 * h + 1] = vcvtq_f32_u32(vmovl_u16(vget_high_u16(w0)));
+        out[4 * h + 2] = vcvtq_f32_u32(vmovl_u16(vget_low_u16(w1)));
+        out[4 * h + 3] = vcvtq_f32_u32(vmovl_u16(vget_high_u16(w1)));
+    }
+}
+
+// mode 0, M == 1, NEON twin of gemv_a_w4_scalar below: identical group
+// decomposition and zero-point correction algebra. The only numeric
+// difference is fused multiply-add (one rounding) where the scalar
+// loop multiplies and adds separately -- fp32 reassociation noise, the
+// same class as the established cross-build logits differences.
+inline void gemv_a_w4_neon(const float* X, int64_t K, int64_t D,
+                           const uint8_t* pk, const float* sc, const uint8_t* ze,
+                           const float* bias, float* Y) {
+    const int64_t ng = D / 64;
+    kernel_pool().run([&](int idx, int nt) {
+        chunk(idx, nt, ng, [&](int64_t g0, int64_t g1) {
+            for (int64_t g = g0; g < g1; g++) {
+                float32x4_t acc[16];
+                const float* bsrc = bias ? bias + g * 64 : nullptr;
+                for (int t = 0; t < 16; t++)
+                    acc[t] = bsrc ? vld1q_f32(bsrc + 4 * t) : vdupq_n_f32(0.0f);
+                float corr = 0.0f;
+                for (int64_t i = 0; i < K; i++) {
+                    float f = X[i] * sc[(size_t)i * ng + g];
+                    corr += f * (float)ze[(size_t)i * ng + g];
+                    const uint8_t* prow = pk + (size_t)i * (D / 2) + g * 32;
+                    for (int c = 0; c < 2; c++) {
+                        float32x4_t w[8];
+                        expand_w4_32(prow + 16 * c, w);
+                        for (int t = 0; t < 8; t++)
+                            acc[8 * c + t] = vfmaq_n_f32(acc[8 * c + t], w[t], f);
+                    }
+                }
+                float32x4_t cv = vdupq_n_f32(corr);
+                float* y = Y + g * 64;
+                for (int t = 0; t < 16; t++) vst1q_f32(y + 4 * t, vsubq_f32(acc[t], cv));
+            }
+        });
+    });
+}
+
+// mode 1, M == 1: fused GEMV for the transB layout (W stored (D, K),
+// groups along K). Folds the zero point per group instead of
+// dequantizing the row into an fp32 temp buffer:
+//   y[j] = bias[j] + sum_g s[j,g] * (dot_g(X, nib[j,g]) - z[j,g] * sumx_g)
+// with sumx_g = sum of X over group g, computed once per call and
+// shared by all D rows. The packed bytes are read exactly once.
+inline void gemv_b_w4_neon(const float* X, int64_t K, int64_t D,
+                           const uint8_t* pk, const float* sc, const uint8_t* ze,
+                           const float* bias, float* Y) {
+    const int64_t ng = K / 64;
+    float sumx_buf[64];
+    std::vector<float> sumx_heap;
+    float* sumx = sumx_buf;
+    if (ng > 64) { sumx_heap.assign((size_t)ng, 0.0f); sumx = sumx_heap.data(); }
+    for (int64_t g = 0; g < ng; g++) {
+        float s = 0.0f;
+        const float* xg = X + g * 64;
+        for (int t = 0; t < 64; t++) s += xg[t];
+        sumx[g] = s;
+    }
+    kernel_pool().run([&](int idx, int nt) {
+        chunk(idx, nt, D, [&](int64_t j0, int64_t j1) {
+            for (int64_t j = j0; j < j1; j++) {
+                const uint8_t* prow = pk + (size_t)j * (K / 2);
+                const float* srow = sc + (size_t)j * ng;
+                const uint8_t* zrow = ze + (size_t)j * ng;
+                float y = bias ? bias[j] : 0.0f;
+                for (int64_t g = 0; g < ng; g++) {
+                    const float* xg = X + g * 64;
+                    float32x4_t a[4] = {vdupq_n_f32(0.0f), vdupq_n_f32(0.0f),
+                                        vdupq_n_f32(0.0f), vdupq_n_f32(0.0f)};
+                    for (int c = 0; c < 2; c++) {
+                        float32x4_t w[8];
+                        expand_w4_32(prow + g * 32 + 16 * c, w);
+                        for (int t = 0; t < 8; t++)
+                            a[t % 4] = vfmaq_f32(a[t % 4], w[t], vld1q_f32(xg + 32 * c + 4 * t));
+                    }
+                    float d = vaddvq_f32(vaddq_f32(vaddq_f32(a[0], a[1]),
+                                                   vaddq_f32(a[2], a[3])));
+                    y += srow[g] * (d - (float)zrow[g] * sumx[g]);
+                }
+                for (int64_t i = ng * 64; i < K; i++) {
+                    uint8_t byte = prow[i / 2];
+                    int nib = (i % 2 == 0) ? (byte >> 4) : (byte & 0xF);
+                    y += X[i] * ((float)nib - (float)zrow[i / 64]) * srow[i / 64];
+                }
+                Y[j] = y;
+            }
+        });
+    });
+}
+#endif  // POTATO_PACKED_NEON
+
 // mode 0, M == 1: fully fused GEMV. Reads the packed bytes exactly once,
 // never materializes fp32 weights. Per (row i, group g) the factor f = x_i *
 // s[i,g] is constant over the group's 64 outputs, and the zero-point term
 // collapses into a per-group scalar correction:
 //   y[j] = sum_i f(i, g(j)) * nib(i, j) - sum_i f(i, g(j)) * z[i, g(j)].
-inline void gemv_a_w4(const float* X, int64_t K, int64_t D,
-                      const uint8_t* pk, const float* sc, const uint8_t* ze,
-                      const float* bias, float* Y) {
+inline void gemv_a_w4_scalar(const float* X, int64_t K, int64_t D,
+                             const uint8_t* pk, const float* sc, const uint8_t* ze,
+                             const float* bias, float* Y) {
     const int64_t ng = D / 64;
     kernel_pool().run([&](int idx, int nt) {
         chunk(idx, nt, ng, [&](int64_t g0, int64_t g1) {
@@ -137,6 +281,22 @@ inline void gemv_a_w4(const float* X, int64_t K, int64_t D,
             }
         });
     });
+}
+
+// Dispatch: NEON tier only when explicitly enabled (POTATO_NEON_GEMV=1,
+// see the note at POTATO_PACKED_NEON) and the shape is a whole number
+// of 64-wide groups; the scalar floor otherwise (and always on x86,
+// which never compiles the NEON branch).
+inline void gemv_a_w4(const float* X, int64_t K, int64_t D,
+                      const uint8_t* pk, const float* sc, const uint8_t* ze,
+                      const float* bias, float* Y) {
+#if POTATO_PACKED_NEON
+    if (neon_gemv_enabled() && cpu::features().neon && D >= 64 && D % 64 == 0) {
+        gemv_a_w4_neon(X, K, D, pk, sc, ze, bias, Y);
+        return;
+    }
+#endif
+    gemv_a_w4_scalar(X, K, D, pk, sc, ze, bias, Y);
 }
 
 // Row-tile apply for the block-dequantized GEMM: acc[m][jb] += X[m][i] *
@@ -205,6 +365,16 @@ inline void gemm_a_w4(const float* X, int64_t M, int64_t K, int64_t D,
 inline void gemm_b_w4(const float* X, int64_t M, int64_t K, int64_t D,
                       const uint8_t* pk, const float* sc, const uint8_t* ze,
                       const float* bias, float* Y) {
+#if POTATO_PACKED_NEON
+    // Decode steps are M == 1: take the fused NEON GEMV (no fp32 temp
+    // row) when the tier is explicitly enabled (POTATO_NEON_GEMV=1;
+    // default off, it measured slower than scalar on A57). Prefill
+    // (M > 1) keeps the block path below on every arch.
+    if (M == 1 && K >= 64 && neon_gemv_enabled() && cpu::features().neon) {
+        gemv_b_w4_neon(X, K, D, pk, sc, ze, bias, Y);
+        return;
+    }
+#endif
     const int64_t ng = K / 64;
     kernel_pool().run([&](int idx, int nt) {
         std::vector<float> wd(K);

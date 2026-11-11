@@ -741,13 +741,34 @@ bool unop_rows(UnOp op, const RT& A, RT& Y, double alpha, const int64_t* as, con
     return true;
 }
 
+// BINOP path histogram (diagnostics under FE_PROFILE): which k_binop
+// path serves each call, with time, elements and the slowest single
+// call per path. Printed by prof_print alongside the per-kind table.
+// Kept from the 2026-11-10 knife-5 diagnosis (ORT-FREE.md section
+// 12): walk_par is where decode's elementwise time lives.
+struct BinopPathStat { long n = 0; double us = 0; long long elems = 0; double max_us = 0; };
+static BinopPathStat g_binop_paths[5];
+static const char* g_binop_path_names[5] = {"f32_fast", "rows", "walk_par", "serial_odom", "generic_odom"};
+static bool fe_profile_on() { static const bool on = std::getenv("FE_PROFILE") != nullptr; return on; }
+
 void k_binop(BinOp op, const RT& A, const RT& B, RT& Y) {
-    if (binop_f32_fast(op, A, B, Y)) return;
+    const bool prof = fe_profile_on();
+    const auto t0 = prof ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    auto note = [&](int path) {
+        if (!prof) return;
+        double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count();
+        BinopPathStat& s = g_binop_paths[path];
+        s.n++;
+        s.us += us;
+        s.elems += Y.numel();
+        if (us > s.max_us) s.max_us = us;
+    };
+    if (binop_f32_fast(op, A, B, Y)) { note(0); return; }
     if (A.dtype == 1 && B.dtype == 1 && Y.dtype == 1) {
         int64_t as[8], bs[8], ys[8];
         if (aligned_strides(A, Y.shape, as) && aligned_strides(B, Y.shape, bs) && aligned_strides(Y, Y.shape, ys)) {
-            if (binop_rows(op, A, B, Y, as, bs, ys)) return;
-            if (Y.numel() >= 8192) { binop_walk_par(op, A, B, Y, as, bs, ys); return; }
+            if (binop_rows(op, A, B, Y, as, bs, ys)) { note(1); return; }
+            if (Y.numel() >= 8192) { binop_walk_par(op, A, B, Y, as, bs, ys); note(2); return; }
             int r = (int)Y.shape.size();
             int64_t coord[8] = {0};
             int64_t ao = 0, bo = 0, yo = 0;
@@ -764,6 +785,7 @@ void k_binop(BinOp op, const RT& A, const RT& B, RT& Y) {
                     ao -= as[d] * Y.shape[d]; bo -= bs[d] * Y.shape[d]; yo -= ys[d] * Y.shape[d];
                 }
             }
+            note(3);
             return;
         }
     }
@@ -775,6 +797,7 @@ void k_binop(BinOp op, const RT& A, const RT& B, RT& Y) {
         double vb = read_d(B, off_of(B, c, ab));
         write_d(Y, off_of(Y, c, ay), binop_apply(op, va, vb));
     });
+    note(4);
 }
 
 void k_unop(UnOp op, const RT& A, RT& Y, double alpha = 0.0) {
@@ -3655,6 +3678,12 @@ static void prof_print() {
         for (int i = 0; i < 26; i++)
             if (kv.second.n[i]) std::fprintf(stderr, "  %-10s %8ld calls %12.1f ms\n", g_prof_names[i], kv.second.n[i], kv.second.us[i] / 1000.0);
     }
+    std::fprintf(stderr, "[FE_PROFILE] binop paths (all plans):\n");
+    for (int i = 0; i < 5; i++)
+        if (g_binop_paths[i].n)
+            std::fprintf(stderr, "  %-12s %8ld calls %12.1f ms  %14lld elems  max %.1f ms\n",
+                         g_binop_path_names[i], g_binop_paths[i].n, g_binop_paths[i].us / 1000.0,
+                         g_binop_paths[i].elems, g_binop_paths[i].max_us / 1000.0);
 }
 static void prof_add(const std::string& label, int kind, double us) {
     static bool reg = (std::atexit(prof_print), true);
