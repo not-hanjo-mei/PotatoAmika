@@ -451,3 +451,23 @@ something.
 Red-line scan over the round-4 delta: no weights, models, persona
 or Live2D content; no access domains or hostnames; no secrets;
 both changed files are plain UTF-8 text.
+
+# Round 5 — 2026-11-11: D8100 spike result
+
+## What changed and why
+
+1. `docs/ANDROID-SPIKE.md` (new) — the full record of the bionic
+   test build of the TTS host: the free engine's core sources
+   compile unmodified under the NDK, the only ORT coupling is one
+   entry symbol in the host glue, a free-only binary links against
+   bionic system libraries only, and the remaining production work
+   is the host-glue split plus an on-device smoke test (about a
+   day in total, estimated). Publication edits on the repo copy:
+   two local scratch/toolchain paths generalized; nothing else
+   altered.
+2. `docs/D8100-PORT.md` — status updated and a spike-result section
+   added: risk 1 (TTS host bionic build) is retired with the
+   evidence above.
+
+Still no production code in the repo from this round: the spike
+ran on a scratch copy and the shipping sources are untouched.

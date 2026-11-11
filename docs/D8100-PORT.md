@@ -1,7 +1,8 @@
 # Next target: Dimensity 8100 — Android userspace port plan
 
-Status: selected 2026-11-11. No port code exists yet; this document
-is the plan and the reasoning, written before the work starts.
+Status: selected 2026-11-11. The plan below was written before
+the work started; its first de-risking step has since been done —
+see the spike result at the end of this document.
 
 ## Why this device
 
@@ -46,8 +47,9 @@ unchanged.
 1. **TTS host bionic build.** The engine is self-contained C++
    (the free-engine path uses no ONNX Runtime), so this is expected
    to be a build-system exercise rather than a code port — but it
-   is the only component where that is a guess, so it is being
-   test-built first, before any device-side work.
+   was the only component where that was a guess, so it was
+   test-built first, before any device-side work. The guess held;
+   see the spike result at the end of this document.
 2. **ASR host** against ONNX Runtime's Android build: same library,
    different packaging.
 3. **Android background execution.** Termux wake lock plus
@@ -81,3 +83,24 @@ Mi 4c).
 
 Licensing and publication rules are unchanged: no weights, Live2D
 models or persona files in this repository, in any round.
+
+## Spike result (2026-11-11): risk 1 retired
+
+The TTS host was test-built for bionic on a scratch copy (NDK,
+aarch64-linux-android, API 26); shipping sources untouched. The
+free engine's core sources compile unmodified — the free path
+never includes ONNX Runtime headers — and its runtime CPU
+dispatch reads `getauxval(AT_HWCAP)`, which bionic provides, so
+the dot-product kernels will be selected on the Cortex-A78
+cores. The host's main file is the only ORT coupling (it
+constructs the ORT environment before the engine branch); a
+free-only binary linked against bionic system libraries alone,
+using a trap stub for that single entry symbol. Stripped size
+1,434,088 B against the musl phone build's 822,424 B, the delta
+being the statically linked libc++. The binary has not run
+anywhere yet: the build machine has no bionic runtime, so first
+execution happens on the device, inside the smoke test.
+Remaining tts_host work is mechanical: split the ORT path out
+of the main file behind a build option (about half a day,
+estimated), then the on-device smoke test (about half a day,
+estimated). Full record: `docs/ANDROID-SPIKE.md`.
