@@ -1,6 +1,6 @@
 # PotatoAmika
 
-**Status: the Mi 4c round is closed — it ran, and on performance it failed. Paused pending stronger hardware.**
+**Status: the Mi 4c round is closed — it ran, and on performance it failed. Next target selected: a Dimensity 8100 handset, ported in Android userspace (plan: `docs/D8100-PORT.md`).**
 PotatoAmika is an experiment, not finished software, so expect rough
 edges, missing pieces and no support. It was installed on its target
 handset (the Mi 4c below) on 2026-11-10, passed the installer's full
@@ -16,10 +16,14 @@ prefill of the 5.6k-token persona on the first turn). Both GPU
 routes were investigated and are closed on this device (Turnip has
 no Adreno 4xx support; the vendor OpenCL path probed 12–20x slower
 than the NEON CPU kernels). Verdict for this hardware round: a
-working port, a failed deployment. Development is paused until a
-stronger device is available; the engine was kept portable on
-purpose (runtime CPU dispatch, an fp32 baked-graph fallback), so
-the same stack should drop onto a newer SoC without redesign.
+working port, a failed deployment. The next round is now scoped: the same stack, rebuilt for Android
+userspace on a Dimensity 8100 phone whose locked bootloader rules
+out the container route — plan and reasoning in
+`docs/D8100-PORT.md`. No port code exists yet; the first step is a
+test build of the TTS host against bionic. The engine was kept
+portable on purpose (runtime CPU dispatch, an fp32 baked-graph
+fallback), so the stack should carry onto the newer SoC without
+redesign.
 
 **PotatoAmika** is a ground-up, fully local reimplementation of
 [OpenAmika](https://github.com/zeekk0/OpenAmika)'s runtime. The original

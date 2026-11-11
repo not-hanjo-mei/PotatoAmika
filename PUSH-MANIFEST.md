@@ -427,3 +427,27 @@ Red-line scan over the round-3 delta: weight/model extensions 0,
 ELF/Mach-O/PE magic 0 (all files text), secrets sweep 0, machine
 paths in code 0, persona filenames / `namedict.tsv` / `memory.json`
 / Live2D files 0, symlinks 0, all files valid UTF-8.
+
+# Round 4 — 2026-11-11: next target selected (Dimensity 8100)
+
+## What changed and why
+
+1. `docs/D8100-PORT.md` (new) — the port plan for the next hardware
+   round: a locked-bootloader Dimensity 8100 handset, the whole
+   stack in Termux userspace with NDK/bionic rebuilds, proot
+   excluded per the standing project rule, a component-by-component
+   build table, the risk order, and the unchanged success metric
+   (same medium-sentence TTS RTF, target single digit).
+2. Root `README.md` — status updated: the "paused pending stronger
+   hardware" line is replaced by the selected next target, pointing
+   at the plan. Both edits are inside the PotatoAmika section; the
+   upstream tail is untouched.
+
+No code changed in this round: the port does not exist yet. The
+first de-risking step (a bionic test build of the TTS host) is in
+progress locally and will land as its own round when it produces
+something.
+
+Red-line scan over the round-4 delta: no weights, models, persona
+or Live2D content; no access domains or hostnames; no secrets;
+both changed files are plain UTF-8 text.
