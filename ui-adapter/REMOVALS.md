@@ -75,6 +75,17 @@ above, listed here so the diff has no surprises.
   regenerated `use.html` differs from the previous build on the title
   line only.
 
+  Package note (2026-11-10): the preview picked the title up because
+  it serves the regenerated `build/` output directly, but the slim
+  package the phone was installed from (`981528c9…`) had been trimmed
+  out of the earlier full package's staged tree, whose
+  `patched/use.html` predates the regeneration — so the installed
+  phone kept `OpenAmika · Use` even though `patch.py` and `build/`
+  were already correct. The slim package rebuilt from the assembly
+  sources (`10e1d279…`, `patched/use.html` sha256 `6cc18f41…`)
+  carries the new title, and the already-installed phone's file was
+  patched in place to the same bytes.
+
 Known leftover: the wizard's step-2 hint still says "Two quick things:
 the brain she thinks with, and a check that her voice and hearing are
 wired up." The brain half refers to the removed provider step. The

@@ -1,13 +1,25 @@
 # PotatoAmika
 
-**Status: very early exploration — now running on the phone.**
-PotatoAmika is an experiment in progress, not finished software, so
-expect rough edges, missing pieces and no support. It was installed
-on its target handset (the Mi 4c below) on 2026-11-10 and passed the
-installer's full self-test there — conversation round trip, speech
-recognition, standalone synthesis and model listing all green — with
-the brain running at four threads. Please don't judge it by the
-standards of a usable release.
+**Status: the Mi 4c round is closed — it ran, and on performance it failed. Paused pending stronger hardware.**
+PotatoAmika is an experiment, not finished software, so expect rough
+edges, missing pieces and no support. It was installed on its target
+handset (the Mi 4c below) on 2026-11-10, passed the installer's full
+self-test there, and then got a real trial by its owner. The system
+works end to end, but voice turns take minutes: after five rounds of
+on-device kernel work, medium-sentence TTS synthesis sits at RTF
+18.6–19.4 on the Snapdragon 808's Cortex-A57 cores, about 19x from
+real time, and that remaining gap is the SoC itself (ARMv8.0, no
+dot-product instructions) rather than kernel quality — the full
+record is `docs/ORT-FREE.md`, sections 7–15. The brain is also
+minutes-scale there (about 9 tok/s generation; a ~5 minute cold
+prefill of the 5.6k-token persona on the first turn). Both GPU
+routes were investigated and are closed on this device (Turnip has
+no Adreno 4xx support; the vendor OpenCL path probed 12–20x slower
+than the NEON CPU kernels). Verdict for this hardware round: a
+working port, a failed deployment. Development is paused until a
+stronger device is available; the engine was kept portable on
+purpose (runtime CPU dispatch, an fp32 baked-graph fallback), so
+the same stack should drop onto a newer SoC without redesign.
 
 **PotatoAmika** is a ground-up, fully local reimplementation of
 [OpenAmika](https://github.com/zeekk0/OpenAmika)'s runtime. The original
@@ -29,7 +41,7 @@ documents, which our documents now sit alongside in `docs/`.
 
 | Directory | What it is |
 |---|---|
-| `engine/` | Self-built TTS inference engine (C++17, no ONNX Runtime): static load-time execution plans for the five GPT-SoVITS graphs, a W4 weight-only packed format with fused dequantization, CPU-dispatched kernels (ARMv8.0 NEON baseline, x86-64 AVX2). GPT decode ~45 ms/step class on a Cortex-A57, ~270–320 MB resident. Design record: `docs/ORT-FREE.md`, `docs/STAGE*.md`. |
+| `engine/` | Self-built TTS inference engine (C++17, no ONNX Runtime): static load-time execution plans for the five GPT-SoVITS graphs, a W4 weight-only packed format with fused dequantization, CPU-dispatched kernels (ARMv8.0 NEON baseline, x86-64 AVX2). Final on-device record: five NEON kernel rounds on the Mi 4c, medium-sentence RTF 18.6–19.4, ~262–320 MB resident. Design record: `docs/ORT-FREE.md`, `docs/STAGE*.md`. |
 | `quantize/` | The conversion method: how the shipping weight packs are made from stock GPT-SoVITS fine-tune weights, locally. Start at `quantize/README.md`. |
 | `scheduler/` | The orchestrator (Go, standard library only): owns the brain/embeddings llama.cpp servers and the TTS host; conversation turns, memory extraction and recall, tone classification, vision unload/reload for photo questions, and a standalone `POST /v1/say` synthesis endpoint. Contract: `docs/API.md`. |
 | `asr/` | The ears: Moonshine Tiny (quantized) + Silero VAD in one C++ ONNX Runtime host with a streaming mode, plus a small Go WebSocket gateway. Record: `docs/ASR.md`. |

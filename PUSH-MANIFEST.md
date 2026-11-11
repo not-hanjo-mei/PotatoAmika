@@ -374,3 +374,56 @@ before the push and re-run over the remote tree after it:
 | Machine paths in code (`/home/hatch`, `/data/home`, preview/trial hostnames in `*.go *.py *.sh *.tmpl *.mod`) | 0 after the publication edits above |
 | Persona filenames, `namedict.tsv`, `memory.json`, Live2D model files | 0 — none in the delta |
 | Symlinks / UTF-8 | 0 / all pass |
+
+---
+
+## Round 3 — pre-push record (2026-11-11)
+
+Base head before this push: `353bb49` (round 2). Scope: the TTS
+kernel campaign of 2026-11-10/11, the deploy hardening that came out
+of the on-device install, and the closing of the Mi 4c round.
+
+Delta, by commit:
+
+1. `engine/src/free_engine.cpp`, `engine/src/packed_core.h`,
+   `engine/src/vits_kernels.cpp`, `engine/src/vits_kernels.h` —
+   the five NEON kernel rounds (vits PackedConv NEON tile,
+   register-window EXT taps for dilations 1/3/5, K11-d5 pos8
+   window; NEON GEMV kept in source but gated off by default after
+   measuring 24% slower than the compiler's output). The four
+   check/host files (`main.cpp`, `tf_check.cpp`,
+   `tf_check_free.cpp`, `vits_check_free.cpp`) were diffed against
+   the development tree: their only delta remains the round-1
+   publication edit, so they are unchanged in this round.
+2. `deploy/deploy.sh`, `deploy/scheduler.json.tmpl` — package
+   integrity guard in the extract step (a resident tarball whose
+   hash differs from `PKG_SHA256` is skipped with a warning instead
+   of being extracted over the live tree; this exact accident
+   downgraded a live install on 2026-11-11), page-title self-heal,
+   and post-render normalization of the decided thread counts
+   (`tts_threads` 4, `brain_threads` 4; the template default for
+   `brain_threads` is now 4 as well).
+3. `docs/ORT-FREE.md` (sections 7–15: the kernel rounds and their
+   verdicts), `ui-adapter/REMOVALS.md` (package-lineage addition),
+   root `README.md` (status rewritten: the Mi 4c round is closed,
+   failed on performance, development paused pending stronger
+   hardware; the upstream tail is byte-identical to round 2,
+   verified by hash from the marker line), and this manifest.
+
+One publication edit in this round: a stale incident paragraph in
+`docs/ORT-FREE.md` named the maintainer's private access domain and
+a local recovery script that was never run; in the repo copy it is
+replaced by the recorded outcome (the on-device full-graph re-run
+was abandoned on memory grounds; correctness rests on the x86
+bit-identical regression, tile-level maxdiff 0, and the QEMU
+subset). The development tree keeps its original wording.
+
+Diffed and unchanged this round: `scheduler/`, `asr/`,
+`quantize/`, `ui-adapter/go/` (its only delta against the
+development tree remains the round-2 publication edit),
+`deploy/assemble_stage.py` and `deploy/build_slim.sh` (same).
+
+Red-line scan over the round-3 delta: weight/model extensions 0,
+ELF/Mach-O/PE magic 0 (all files text), secrets sweep 0, machine
+paths in code 0, persona filenames / `namedict.tsv` / `memory.json`
+/ Live2D files 0, symlinks 0, all files valid UTF-8.
