@@ -112,7 +112,14 @@ step_extract() {
     TARBALL="$_tmp_tar"; _assembled=1
     say "分片拼好并验过整包哈希"
   fi
-  if [ -f "$TARBALL" ]; then
+  if [ -f "$TARBALL" ] && [ "${_assembled:-0}" != 1 ]; then
+    _sum="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
+    if [ "$_sum" != "$PKG_SHA256" ]; then
+      say "警告：$TARBALL 的哈希对不上脚本钉死的包（要 $PKG_SHA256、实测 $_sum），跳过解包，绝不让对不上的包覆盖现有安装"
+      _skip_extract=1
+    fi
+  fi
+  if [ -f "$TARBALL" ] && [ "${_skip_extract:-0}" != 1 ]; then
     mkdir -p "$INSTALL_DIR" || fail "建不了 $INSTALL_DIR"
     case "$TARBALL" in *.gz) _tf=xzf ;; *) _tf=xf ;; esac
     tar -$_tf "$TARBALL" -C "$INSTALL_DIR" --strip-components=1 || fail "解 $TARBALL 失败"
@@ -125,6 +132,11 @@ step_extract() {
   fi
   mkdir -p "$INSTALL_DIR/data/memory" "$INSTALL_DIR/data/orig-ui" "$INSTALL_DIR/logs" "$INSTALL_DIR/run" "$INSTALL_DIR/out/tts" "$INSTALL_DIR/models-live2d"
   chmod +x "$INSTALL_DIR/bin/"* 2>/dev/null || true
+  # 页面标题自愈：旧树里的 use.html 可能带原版标题，统一改回 PotatoAmika
+  _ui_html="$INSTALL_DIR/orig-ui/patched/use.html"
+  if [ -f "$_ui_html" ] && grep -q 'OpenAmika · Use' "$_ui_html"; then
+    sed -i 's/OpenAmika · Use/PotatoAmika/' "$_ui_html" && say "页面标题已修正为 PotatoAmika（旧树带的是原版标题）"
+  fi
 }
 
 step_verify() {
@@ -140,7 +152,11 @@ step_config() {
   sed "s|@ROOT@|$INSTALL_DIR|g" "$INSTALL_DIR/config/scheduler.json.tmpl" > "$INSTALL_DIR/config/scheduler.json" \
     || fail "渲染 scheduler.json 失败"
   grep -q "$INSTALL_DIR" "$INSTALL_DIR/config/scheduler.json" || fail "scheduler.json 里没替进安装路径"
-  say "scheduler.json 已按 $INSTALL_DIR 生成（12k、persona_trim 关、scenes 英文版、memory_language en）"
+  # tts_threads 定版为 4（2026-11-10 用户拍板；包内模板仍是 2，生成后统一改过来，免得重装把定版冲掉）
+  sed -i 's/"tts_threads"[[:space:]]*:[[:space:]]*2/"tts_threads": 4/' "$INSTALL_DIR/config/scheduler.json"
+  # brain_threads 定版同为 4（装机时定版；2026-11-11 旧包事故曾把它冲回 2，症状是大脑只跑双核，一并归一）
+  sed -i 's/"brain_threads"[[:space:]]*:[[:space:]]*2/"brain_threads": 4/' "$INSTALL_DIR/config/scheduler.json"
+  say "scheduler.json 已按 $INSTALL_DIR 生成（12k、persona_trim 关、scenes 英文版、memory_language en、tts_threads 4、brain_threads 4）"
 }
 
 step_llm_models() {
