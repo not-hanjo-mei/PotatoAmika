@@ -427,3 +427,48 @@ Red-line scan over the round-3 delta: weight/model extensions 0,
 ELF/Mach-O/PE magic 0 (all files text), secrets sweep 0, machine
 paths in code 0, persona filenames / `namedict.tsv` / `memory.json`
 / Live2D files 0, symlinks 0, all files valid UTF-8.
+
+---
+
+## Libra benchmarks round — pre-push record (2026-11-12)
+
+Base head before this push: `6beb715` (round 3; the `libra` branch
+has not moved since the 2026-11-11 branch split). Scope:
+documentation only — the consolidated Mi 4c benchmark record. This
+round is libra-only: `main` and `rubens` are untouched, and the
+full cross-device `BENCHMARKS.md` still ships with the next
+`rubens` round.
+
+Delta, by commit:
+
+1. `docs/BENCHMARKS.md` (new — the Mi 4c / libra edition of the
+   consolidated before/after table), `docs/BENCH-VS-STOCK.md`
+   (new — the source record behind the stock-comparison rows),
+   root `README.md` (the `docs/` layout row now names the two new
+   documents; nothing else in the README changes — the PotatoAmika
+   status section and the upstream tail are unchanged from
+   round 3).
+2. This manifest.
+
+Publication edits in this round (staged copies only; the
+development tree keeps its original wording):
+
+- `docs/BENCHMARKS.md` is an edition, not the full compiled table:
+  it carries §1, §2 and the Mi 4c row of §7 of the working-tree
+  `BENCHMARKS.md`, verbatim except that the stock subsection's
+  working-tree provenance note becomes a pointer to
+  `docs/BENCH-VS-STOCK.md` and its source cells drop the
+  "(working tree)" suffix — that document ships in this same
+  round. The edition header states the split and points at the
+  `rubens` branch for the full cross-device table. No number or
+  condition was recomputed or re-rounded.
+- `docs/BENCH-VS-STOCK.md`: two generalizations — the neutral1
+  reference clip is named by its tag instead of its
+  reference-corpus filename, and a maintainer-tree path to a local
+  intermediate weight copy is dropped. Numbers untouched.
+
+Red-line scan over this round's delta: weight/model files 0 (all
+four files text), ELF/Mach-O/PE magic 0, secrets sweep 0, private
+domains / hostnames / machine paths 0, persona filenames /
+`namedict.tsv` / `memory.json` / Live2D files 0, symlinks 0, all
+files valid UTF-8.
