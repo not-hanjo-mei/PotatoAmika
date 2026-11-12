@@ -49,6 +49,27 @@ documents, which our documents now sit alongside in `docs/`.
 | `deploy/` | One-command install into the phone's container (`deploy.sh`). The package is slim: the public GGUF and ASR models are not in the tarball — `deploy.sh` downloads them at install time from hash-pinned revisions (the Minico brain GGUF is pinned to revision `eee16357`; upstream's `main` has since diverged), reuses a hash-matching brain GGUF already in the home directory when one is there, and fetches the Live2D models the same way (`live2d-files.txt`). Package assembly: `assemble_stage.py` + `build_slim.sh`. |
 | `docs/` | PotatoAmika's engineering record: STAGE1–3 (TTS bring-up), ORT-FREE (dropping ONNX Runtime), VITS-W4 and DEESS (the voice output chain), SCHEDULER + API, ASR + FREE-CENSUS (why ASR stayed on ORT), BUDGET (the 1.3 GiB memory ledger), BENCHMARKS with BENCH-VS-STOCK (the consolidated before/after performance and memory numbers), CONVO-TEST/2 (live conversation tests). These files sit alongside upstream's own documents in the same folder; upstream's files are unchanged. |
 
+## Benchmarks
+
+Headline pairs from the consolidated before/after record. Every figure
+is quoted with its conditions; the full tables — including the
+comparisons that came out as ties and the candidates rejected on
+measurement — are in the document linked at the end. The stock
+GPT-SoVITS comparison is x86-only: on the target phone class
+(≈1.28 GiB usable RAM) stock does not fit at all — its peak RSS alone
+is ≈5.1 GB — so no on-device pair exists.
+
+| metric | before | after | conditions |
+|---|---|---|---|
+| TTS peak RSS over synthesis | 5,120.9 MB (stock GPT-SoVITS) | 457.8 MB (≈11.2× less) | x86 dev VM, both sides locked to 2 threads, same 6 sentences and neutral1 reference |
+| TTS load time | ≈27–29 s (stock GPT-SoVITS) | ≈1.1 s (≈27× faster) | same comparison as above |
+| TTS on the Mi 4c, first NEON kernel round | whole request 107.5 s; vits segment 79.8 s | whole request 54.2 s; vits 31.7 s (2.52×) | device, short sentence, same session back-to-back, threads 2, ttsscan calibre |
+| TTS on the Mi 4c, five-round endpoints | medium-sentence RTF ≈79.8 (generic kernels, threads 2) | medium-sentence RTF 18.6–19.4 (final production, threads 4) | device, medium sentence, seed 42; not a single A/B — the thread count changed mid-series |
+| vits weight pack | 62,844,080 B (W8 pack; full-graph corr 0.9680 vs fp32) | 43,523,616 B (hybrid pack E; corr 0.9599) | VM, denoised evaluation, fixed neutral1 + S0 inputs |
+| Whole stack resident on the Mi 4c | ≈850 MB (original estimate) | ≈1,019–1,075 MB measured, against ≈1,311 MB usable | Minico-era budget, 2026-11-09; the budget mixes measured and device-derived rows |
+
+Full table: `docs/BENCHMARKS.md`.
+
 ## What is NOT here — bring your own
 
 No weights, models or persona files are in this repository, in any form:

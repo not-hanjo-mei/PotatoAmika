@@ -472,3 +472,23 @@ four files text), ELF/Mach-O/PE magic 0, secrets sweep 0, private
 domains / hostnames / machine paths 0, persona filenames /
 `namedict.tsv` / `memory.json` / Live2D files 0, symlinks 0, all
 files valid UTF-8.
+
+## Libra README benchmarks section — pre-push record (2026-11-12)
+
+Base head before this push: `856f3a4` (the libra benchmarks round
+above). Scope: root `README.md` only — a `## Benchmarks` highlights
+section in the PotatoAmika part, six paired rows quoted verbatim,
+with conditions, from this branch's `docs/BENCHMARKS.md` (stock
+GPT-SoVITS peak RSS and load time, the first NEON kernel round and
+the five-round endpoints on the Mi 4c, the vits weight pack, the
+whole-stack resident total), ending with a pointer to
+`docs/BENCHMARKS.md`. Nothing else in the README changes: the
+upstream tail (marker line to EOF) hashes identically before and
+after, `20a85cfbb432…`. This manifest entry rides in the same
+commit as the README change.
+
+Red-line scan over this round's delta: weight/model files 0 (both
+files text), ELF/Mach-O/PE magic 0, secrets sweep 0, private
+domains / hostnames / machine paths 0, persona filenames /
+`namedict.tsv` / `memory.json` / Live2D files 0, symlinks 0, all
+files valid UTF-8.
